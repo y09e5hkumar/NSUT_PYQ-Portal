@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import api from "../api/axios";
+import api, { API_URL } from "../api/axios";
 import { useAuth } from "../context/AuthContext";
 import toast from "react-hot-toast";
 
@@ -80,7 +80,7 @@ export default function Login() {
       <button
         type="button"
         onClick={() =>
-          (window.location.href = `${import.meta.env.VITE_API_URL}/auth/google`)
+          (window.location.href = `${API_URL}/auth/google`)
         }
         className="w-full flex items-center justify-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors mb-4"
       >
