@@ -12,8 +12,7 @@ connectDB();
 
 const app = express();
 
-// lightweight health check for cron ping
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -44,6 +43,10 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// lightweight health check for cron ping
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/papers', require('./routes/paperRoutes'));
 
