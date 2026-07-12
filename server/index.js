@@ -12,6 +12,9 @@ connectDB();
 
 const app = express();
 
+// lightweight health check for cron ping
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
