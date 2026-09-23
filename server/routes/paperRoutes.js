@@ -3,7 +3,11 @@ const { protect, adminOnly } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 const {
   getPapers,
+  extractPaper,
+  extractPaperGemini,
+  checkDuplicateApi,
   uploadPaper,
+  reportPaper,
   deletePaper,
   incrementDownload,
   getTrending,
@@ -13,24 +17,32 @@ const {
   getBranchStats,
 } = require("../controllers/paperController");
 
-// public routes
+// Public routes
 router.get("/", getPapers);
 router.get("/trending", getTrending);
 
-// admin only — all before /:id
+// Extraction & Dedup routes (Student Auth)
+router.post("/extract", protect, upload.single("pdf"), extractPaper);
+router.post("/extract/gemini", protect, extractPaperGemini);
+router.post("/check-duplicate", protect, checkDuplicateApi);
+
+// Student upload
+router.post("/", protect, upload.single("pdf"), uploadPaper);
+
+// Report a paper (Student Auth)
+router.post("/:id/report", protect, reportPaper);
+
+// Download counter
+router.patch("/:id/download", incrementDownload);
+
+// Admin routes
 router.get("/pending", protect, adminOnly, getPendingPapers);
 router.get("/stats", protect, adminOnly, getStats);
 router.get("/branch-stats", protect, adminOnly, getBranchStats);
 router.patch("/:id/approve", protect, adminOnly, approvePaper);
 router.delete("/:id", protect, adminOnly, deletePaper);
 
-// student upload
-router.post("/", protect, upload.single("pdf"), uploadPaper);
-
-// download counter
-router.patch("/:id/download", incrementDownload);
-
-// single paper — must be last
+// Single paper — must be last
 router.get("/:id", async (req, res) => {
   const Paper = require("../models/Paper");
   const paper = await Paper.findById(req.params.id).populate(

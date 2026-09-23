@@ -1,4 +1,4 @@
-# 📄 NSUT PYQ Hub
+# 📄 NSUT PYQ Portal
 
 A full-stack Previous Year Question Paper management portal for NSUT students — find, preview, and download papers instantly without visiting the library or digging through messy Google Drive folders.
 

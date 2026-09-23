@@ -8,6 +8,8 @@ import Register from "./pages/Register";
 import Upload from "./pages/Upload";
 import Dashboard from "./pages/admin/Dashboard";
 import ReviewQueue from "./pages/admin/ReviewQueue";
+import ReportsQueue from "./pages/admin/ReportsQueue";
+import BranchRequests from "./pages/admin/BranchRequests";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AuthCallback from "./pages/AuthCallback";
 
@@ -44,6 +46,22 @@ export default function App() {
               element={
                 <ProtectedRoute adminOnly>
                   <ReviewQueue />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/reports"
+              element={
+                <ProtectedRoute adminOnly>
+                  <ReportsQueue />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/branch-requests"
+              element={
+                <ProtectedRoute adminOnly>
+                  <BranchRequests />
                 </ProtectedRoute>
               }
             />

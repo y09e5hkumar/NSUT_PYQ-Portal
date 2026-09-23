@@ -49,6 +49,8 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/papers', require('./routes/paperRoutes'));
+app.use('/api/branches', require('./routes/branchRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
 
 app.use((err, req, res, next) => {
   console.error(err.message);
@@ -56,4 +58,16 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+process.on('SIGUSR2', () => {
+  server.close(() => {
+    process.kill(process.pid, 'SIGUSR2');
+  });
+});
+
+process.on('SIGINT', () => {
+  server.close(() => {
+    process.exit(0);
+  });
+});

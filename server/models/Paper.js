@@ -6,27 +6,18 @@ const paperSchema = new mongoose.Schema(
 
     branch: {
       type: String,
-      required: true,
-      enum: [
-        "CSAI",
-        "CSE",
-        "CSDS",
-        "IT",
-        "ITNS",
-        "MAC",
-        "EIOT",
-        "ECE",
-        "EE",
-        "ICE",
-        "ME",
-        "BT",
-        "CSDA",
-        "CIOT",
-        "ECAM",
-        "MEEV",
-        "CE",
-        "GI",
-      ],
+      uppercase: true,
+      trim: true,
+    },
+
+    branchPending: {
+      type: Boolean,
+      default: false,
+    },
+
+    pendingBranchName: {
+      type: String,
+      trim: true,
     },
 
     semester: { type: Number, required: true, min: 1, max: 8 },
@@ -52,15 +43,42 @@ const paperSchema = new mongoose.Schema(
     // Uniqueness is enforced per-branch via the compound index below.
     fileHash: {
       type: String,
-      required: true,
+    },
+
+    contentHash: {
+      type: String,
       index: true,
     },
+
+    extractedText: {
+      type: String,
+    },
+
+    extractionSource: {
+      type: String,
+      enum: ["local", "gemini"],
+      default: "local",
+    },
+
+    extractionConfidence: {
+      type: Object,
+      default: {},
+    },
+
+    editedFields: {
+      type: [String],
+      default: [],
+    },
+
+    courseCode: { type: String },
+    courseTitle: { type: String },
+    degree: { type: String, default: "B.Tech" },
 
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
 
     status: {
       type: String,
-      enum: ["pending", "approved"],
+      enum: ["approved", "flagged", "removed"],
       default: "approved",
     },
 
@@ -69,12 +87,11 @@ const paperSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-paperSchema.index({ subject: "text", title: "text" });
+paperSchema.index({ subject: "text", title: "text", courseTitle: "text" });
 paperSchema.index({ branch: 1, semester: 1, subject: 1 });
 paperSchema.index({ downloads: -1 });
 
-// Same PDF can't be uploaded twice for the same branch,
-// but CAN be shared legitimately across different branches.
-paperSchema.index({ fileHash: 1, branch: 1 }, { unique: true });
+// Content-based deduplication per branch
+paperSchema.index({ contentHash: 1, branch: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("Paper", paperSchema);

@@ -1,12 +1,32 @@
-//const BRANCHES = ["CSE", "IT", "ECE", "EE", "ME", "CE"];
-const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
-//const EXAM_TYPES = ["Mid Sem", "End Sem", "Back Paper", "Quiz"];
-const YEARS = [2025, 2024, 2023, 2022, 2021, 2020];
+import { useState, useEffect } from "react";
+import api from "../api/axios";
 
-const BRANCHES = ["CSAI","CSE","CSDS","IT","ITNS","MAC","EIOT","ECE","EE","ICE","ME","BT","CSDA","CIOT","ECAM","MEEV","CE","GI",];
+const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
+const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
 const EXAM_TYPES = ["Mid Sem", "End Sem", "Summer Sem"];
 
+const FALLBACK_BRANCHES = [
+  "CSAI", "CSE", "CSDS", "IT", "ITNS", "MAC", "EIOT", "ECE", "EE", "ICE", "ME", "BT", "CSDA", "CIOT", "ECAM", "MEEV", "CE", "GI"
+];
+
 export default function FilterBar({ filters, onChange }) {
+  const [branches, setBranches] = useState(
+    FALLBACK_BRANCHES.map((b) => ({ code: b, fullName: b }))
+  );
+
+  useEffect(() => {
+    api
+      .get("/branches")
+      .then((r) => {
+        if (Array.isArray(r.data) && r.data.length > 0) {
+          setBranches(r.data);
+        }
+      })
+      .catch(() => {
+        // use fallback if API call fails
+      });
+  }, []);
+
   const sel = (field) => (e) =>
     onChange({ ...filters, [field]: e.target.value, page: 1 });
 
@@ -21,8 +41,10 @@ export default function FilterBar({ filters, onChange }) {
         onChange={sel("branch")}
       >
         <option value="">All branches</option>
-        {BRANCHES.map((b) => (
-          <option key={b}>{b}</option>
+        {branches.map((b) => (
+          <option key={b.code} value={b.code}>
+            {b.code} — {b.fullName}
+          </option>
         ))}
       </select>
       <select

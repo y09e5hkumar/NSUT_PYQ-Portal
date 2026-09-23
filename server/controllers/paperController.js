@@ -2,7 +2,17 @@ const crypto = require("crypto");
 const Paper = require("../models/Paper");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
-const nodemailer = require("nodemailer");
+const { extractTextAndMetadata } = require("../services/ocrService");
+const { extractMetadataWithGemini } = require("../services/geminiService");
+const {
+  normalizeText,
+  computeContentHash,
+  checkDuplicate,
+  checkMetadataSimilarity,
+} = require("../services/dedupService");
+const { resolveBranch } = require("../services/branchService");
+const { createReport } = require("../services/reportService");
+const { saveTempFile, getTempFile, deleteTempFile } = require("../utils/tempStorage");
 
 const uploadToCloudinary = (buffer) => {
   return new Promise((resolve, reject) => {
@@ -23,18 +33,8 @@ const uploadToCloudinary = (buffer) => {
   });
 };
 
-// Computes a SHA-256 hex digest of the file's raw bytes.
-// Same PDF bytes -> same hash, regardless of filename/title/uploader.
 const hashBuffer = (buffer) =>
   crypto.createHash("sha256").update(buffer).digest("hex");
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
 
 exports.getPapers = async (req, res) => {
   const {
@@ -47,9 +47,14 @@ exports.getPapers = async (req, res) => {
     page = 1,
     limit = 20,
   } = req.query;
-  const filter = { status: "approved" };
 
-  if (branch) filter.branch = branch;
+  // Show papers that are approved or flagged, excluding unresolved pending branch requests
+  const filter = {
+    status: { $in: ["approved", "flagged"] },
+    branchPending: { $ne: true },
+  };
+
+  if (branch) filter.branch = branch.toUpperCase();
   if (semester) filter.semester = Number(semester);
   if (subject) filter.subject = new RegExp(subject, "i");
   if (year) filter.year = Number(year);
@@ -66,77 +71,233 @@ exports.getPapers = async (req, res) => {
   res.json({ papers, total, pages: Math.ceil(total / limit) });
 };
 
-exports.uploadPaper = async (req, res) => {
-  const { title, branch, semester, subject, year, examType } = req.body;
-  const isAdmin = req.user?.role === "admin";
-
+exports.extractPaper = async (req, res) => {
   if (!req.file?.buffer) {
-    return res.status(400).json({ message: "No file uploaded" });
+    return res.status(400).json({ message: "No PDF file uploaded" });
   }
 
-  // 1. Hash the file BEFORE touching Cloudinary — no point uploading
-  //    a file we're about to reject.
-  const fileHash = hashBuffer(req.file.buffer);
+  const tempFileRef = saveTempFile(req.file.buffer);
+  const { extractedText, metadata, confidence } = await extractTextAndMetadata(req.file.buffer);
+  const contentHash = computeContentHash(extractedText || req.file.originalname);
 
-  // 2. Check if this exact PDF already exists FOR THIS BRANCH.
-  //    The same paper can legitimately be shared across different
-  //    branches (e.g. a common Maths paper for CSE + ECE), so the
-  //    duplicate check is scoped to { fileHash, branch }, not just fileHash.
-  const existing = await Paper.findOne({ fileHash, branch }).select(
-    "title branch semester subject year examType status createdAt"
-  );
+  const exactDuplicate = metadata.branch ? await checkDuplicate(contentHash, metadata.branch) : null;
+  const similarityCandidates = metadata.branch ? await checkMetadataSimilarity(metadata, metadata.branch) : [];
 
-  if (existing) {
-    return res.status(409).json({
-      message: "This PDF has already been uploaded for this branch.",
-      existingPaper: existing,
-    });
+  res.json({
+    tempFileRef,
+    extractedText,
+    metadata,
+    confidence,
+    contentHash,
+    exactDuplicate,
+    similarityCandidates,
+    extractionSource: "local",
+  });
+};
+
+exports.extractPaperGemini = async (req, res) => {
+  const { tempFileRef } = req.body;
+  if (!tempFileRef) {
+    return res.status(400).json({ message: "tempFileRef is required" });
   }
 
-  // 3. Safe to upload — no duplicate found.
+  const pdfBuffer = getTempFile(tempFileRef);
+  if (!pdfBuffer) {
+    return res.status(400).json({ message: "Temporary file expired or not found. Please re-upload PDF." });
+  }
+
+  const result = await extractMetadataWithGemini(pdfBuffer);
+  if (!result.success) {
+    return res.status(400).json({ message: result.error || "Gemini extraction failed." });
+  }
+
+  const { extractedText, metadata, confidence } = result.data;
+  if (metadata.branch) {
+    const branchRes = await resolveBranch(metadata.branch);
+    if (branchRes.matched) {
+      metadata.branch = branchRes.code;
+    } else {
+      metadata.rawBranchText = metadata.branch;
+      metadata.branch = "";
+    }
+  }
+
+  const contentHash = computeContentHash(extractedText);
+  const exactDuplicate = metadata.branch ? await checkDuplicate(contentHash, metadata.branch) : null;
+  const similarityCandidates = metadata.branch ? await checkMetadataSimilarity(metadata, metadata.branch) : [];
+
+  res.json({
+    tempFileRef,
+    extractedText,
+    metadata,
+    confidence,
+    contentHash,
+    exactDuplicate,
+    similarityCandidates,
+    extractionSource: "gemini",
+  });
+};
+
+exports.checkDuplicateApi = async (req, res) => {
+  const { contentHash, branch, metadata } = req.body;
+  const exactDuplicate = branch ? await checkDuplicate(contentHash, branch) : null;
+  const similarityCandidates = branch ? await checkMetadataSimilarity(metadata || {}, branch) : [];
+
+  res.json({
+    isDuplicate: !!exactDuplicate,
+    exactDuplicate,
+    similarityCandidates,
+  });
+};
+
+exports.uploadPaper = async (req, res) => {
+  const {
+    title,
+    branch,
+    branchPending,
+    pendingBranchName,
+    semester,
+    subject,
+    year,
+    examType,
+    courseCode,
+    courseTitle,
+    degree,
+    extractedText,
+    extractionSource = "local",
+    editedFields = [],
+    confidence = {},
+    tempFileRef,
+  } = req.body;
+
+  let buffer;
+  if (req.file?.buffer) {
+    buffer = req.file.buffer;
+  } else if (tempFileRef) {
+    buffer = getTempFile(tempFileRef);
+  }
+
+  if (!buffer) {
+    return res.status(400).json({ message: "No PDF file or temp file provided" });
+  }
+
+  const isBranchPending =
+    branchPending === true ||
+    branchPending === "true" ||
+    branch === "OTHER" ||
+    !branch;
+
+  const finalBranchCode = isBranchPending ? null : branch.toUpperCase();
+  const finalPendingBranchName = isBranchPending
+    ? pendingBranchName || "Unlisted Branch"
+    : null;
+
+  const fileHash = hashBuffer(buffer);
+
+  // SERVER-SIDE MANDATORY DEDUP RE-CHECK
+  const textForHash = extractedText && extractedText.trim().length > 10
+    ? extractedText
+    : title + " " + (subject || "") + " " + (courseCode || "");
+
+  const contentHash = computeContentHash(textForHash);
+
+  if (finalBranchCode) {
+    const existingDuplicate = await checkDuplicate(contentHash, finalBranchCode);
+    if (existingDuplicate) {
+      if (tempFileRef) deleteTempFile(tempFileRef);
+      return res.status(409).json({
+        message: "This paper content has already been uploaded for this branch.",
+        existingPaper: existingDuplicate,
+      });
+    }
+  }
+
   let result;
   try {
-    result = await uploadToCloudinary(req.file.buffer);
+    result = await uploadToCloudinary(buffer);
   } catch (err) {
     console.error("Cloudinary upload failed:", err.message);
-    return res
-      .status(502)
-      .json({ message: "File upload failed, please try again." });
+    return res.status(502).json({ message: "File upload failed, please try again." });
+  }
+
+  let parsedEditedFields = editedFields;
+  if (typeof editedFields === "string") {
+    try {
+      parsedEditedFields = JSON.parse(editedFields);
+    } catch (e) {
+      parsedEditedFields = [];
+    }
+  }
+
+  let parsedConfidence = confidence;
+  if (typeof confidence === "string") {
+    try {
+      parsedConfidence = JSON.parse(confidence);
+    } catch (e) {
+      parsedConfidence = {};
+    }
   }
 
   try {
     const paper = await Paper.create({
-      title,
-      branch,
+      title: title || `${subject} ${examType} ${year}`,
+      branch: finalBranchCode,
+      branchPending: isBranchPending,
+      pendingBranchName: finalPendingBranchName,
       semester: Number(semester),
-      subject,
+      subject: subject || title,
       year: Number(year),
       examType,
+      courseCode: courseCode || "",
+      courseTitle: courseTitle || subject || title,
+      degree: degree || "B.Tech",
       pdfUrl: result.secure_url,
       cloudinaryId: result.public_id,
       fileHash,
+      contentHash,
+      extractedText: extractedText || "",
+      extractionSource,
+      extractionConfidence: parsedConfidence,
+      editedFields: parsedEditedFields,
       uploadedBy: req.user?._id,
-      status: isAdmin ? "approved" : "pending",
+      status: "approved", // Live post-submission!
     });
+
+    if (tempFileRef) deleteTempFile(tempFileRef);
 
     res.status(201).json(paper);
   } catch (err) {
-    // Race condition safety net: two identical uploads for the same
-    // branch landed at the same instant and both passed the findOne
-    // check above. The unique compound index on {fileHash, branch}
-    // will make the second .create() throw E11000 here.
-    if (err.code === 11000 && err.keyPattern?.fileHash) {
-      // Clean up the now-orphaned Cloudinary file since we're not saving it.
+    if (err.code === 11000 && (err.keyPattern?.contentHash || err.keyPattern?.fileHash)) {
       await cloudinary.uploader.destroy(result.public_id, {
         resource_type: "raw",
       });
-      return res
-        .status(409)
-        .json({
-          message: "This PDF has already been uploaded for this branch.",
-        });
+      if (tempFileRef) deleteTempFile(tempFileRef);
+      return res.status(409).json({
+        message: "This paper content has already been uploaded for this branch.",
+      });
     }
     throw err;
+  }
+};
+
+exports.reportPaper = async (req, res) => {
+  const { reason, comment } = req.body;
+  const paperId = req.params.id;
+
+  if (!reason) {
+    return res.status(400).json({ message: "Reason is required for reporting" });
+  }
+
+  try {
+    const report = await createReport({
+      paperId,
+      userId: req.user._id,
+      reason,
+      comment,
+    });
+    res.status(201).json({ message: "Report submitted successfully. Thank you!", report });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message || "Failed to submit report" });
   }
 };
 
@@ -160,14 +321,14 @@ exports.incrementDownload = async (req, res) => {
 };
 
 exports.getTrending = async (req, res) => {
-  const papers = await Paper.find({ status: "approved" })
+  const papers = await Paper.find({ status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } })
     .sort({ downloads: -1 })
     .limit(10);
   res.json(papers);
 };
 
 exports.getPendingPapers = async (req, res) => {
-  const papers = await Paper.find({ status: "pending" }).populate(
+  const papers = await Paper.find({ status: "flagged" }).populate(
     "uploadedBy",
     "name email"
   );
@@ -181,42 +342,28 @@ exports.approvePaper = async (req, res) => {
     { new: true }
   ).populate("uploadedBy", "name email");
 
-  if (paper.uploadedBy?.email) {
-    try {
-      await transporter.sendMail({
-        from: process.env.EMAIL_USER,
-        to: paper.uploadedBy.email,
-        subject: `Your paper "${paper.title}" has been approved!`,
-        html: `
-          <h2>Your paper was approved 🎉</h2>
-          <p>Hi ${paper.uploadedBy.name},</p>
-          <p>Your submission <strong>${paper.title}</strong> has been approved and is now live on PYQ Portal.</p>
-          <p>Thank you for contributing!</p>
-        `,
-      });
-    } catch (err) {
-      console.error("Email failed:", err.message);
-    }
-  }
-
+  if (!paper) return res.status(404).json({ message: "Not found" });
   res.json(paper);
 };
 
 exports.getStats = async (req, res) => {
-  const [total, pending, downloads] = await Promise.all([
-    Paper.countDocuments({ status: "approved" }),
-    Paper.countDocuments({ status: "pending" }),
+  const Report = require("../models/Report");
+  const [total, pendingReports, pendingBranchCount, downloads] = await Promise.all([
+    Paper.countDocuments({ status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } }),
+    Report.countDocuments({ status: "pending" }),
+    Paper.countDocuments({ branchPending: true }),
     Paper.aggregate([{ $group: { _id: null, total: { $sum: "$downloads" } } }]),
   ]);
   const topSubjects = await Paper.aggregate([
-    { $match: { status: "approved" } },
+    { $match: { status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } } },
     { $group: { _id: "$subject", downloads: { $sum: "$downloads" } } },
     { $sort: { downloads: -1 } },
     { $limit: 5 },
   ]);
   res.json({
     total,
-    pending,
+    pending: pendingReports,
+    pendingBranchCount,
     totalDownloads: downloads[0]?.total || 0,
     topSubjects,
   });
@@ -224,7 +371,7 @@ exports.getStats = async (req, res) => {
 
 exports.getBranchStats = async (req, res) => {
   const stats = await Paper.aggregate([
-    { $match: { status: "approved" } },
+    { $match: { status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } } },
     {
       $group: {
         _id: "$branch",

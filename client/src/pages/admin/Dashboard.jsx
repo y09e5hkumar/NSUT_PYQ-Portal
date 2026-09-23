@@ -50,19 +50,28 @@ export default function Dashboard() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-2xl font-semibold">Admin dashboard</h1>
-        <Link
-          to="/admin/review"
-          className="text-sm bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 px-4 py-2 rounded-xl"
-        >
-          Review queue ({stats.pending})
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            to="/admin/reports"
+            className="text-sm bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 px-4 py-2 rounded-xl"
+          >
+            Reports queue ({stats.pending})
+          </Link>
+          <Link
+            to="/admin/branch-requests"
+            className="text-sm bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 px-4 py-2 rounded-xl"
+          >
+            Branch requests ({stats.pendingBranchCount || 0})
+          </Link>
+        </div>
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         {[
           { label: "Total papers", value: stats.total, icon: "📄" },
-          { label: "Pending review", value: stats.pending, icon: "⏳" },
+          { label: "Pending reports", value: stats.pending, icon: "🚩" },
+          { label: "Pending branch requests", value: stats.pendingBranchCount || 0, icon: "🌿" },
           { label: "Total downloads", value: stats.totalDownloads, icon: "⬇️" },
         ].map((s) => (
           <div
