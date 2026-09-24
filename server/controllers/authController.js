@@ -111,20 +111,28 @@ exports.resendVerification = async (req, res) => {
 
 exports.login = async (req, res) => {
   const { email, password } = req.body;
-  const user = await User.findOne({ email });
 
-  if (!user || !(await user.matchPassword(password)))
+  if (!email || !password) {
+    return res.status(400).json({ message: "Please enter both email and password." });
+  }
+
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const user = await User.findOne({ email: normalizedEmail });
+
+  if (!user || !(await user.matchPassword(password))) {
     return res.status(401).json({ message: "Invalid credentials" });
+  }
 
-  if (!user.isVerified)
+  if (!user.isVerified) {
     return res.status(401).json({
       message: "Please verify your email first.",
       notVerified: true, // frontend uses this to show resend button
     });
+  }
 
   res.json({
     token: genToken(user._id),
-    user: { id: user._id, name: user.name, role: user.role },
+    user: { id: user._id, name: user.name, role: user.role, email: user.email },
   });
 };
 
