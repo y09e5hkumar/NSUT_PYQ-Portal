@@ -78,4 +78,4 @@ paperSchema.index(
   }
 );
 
-module.exports = mongoose.model("Paper", paperSchema);
+module.exports = mongoose.model("Paper", paperSchema, "paper");

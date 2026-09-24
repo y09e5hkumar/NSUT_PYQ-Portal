@@ -40,30 +40,15 @@ async function migrate() {
         );
       }
       console.log("Successfully migrated 'subjects' documents to 'coursetitles'.");
-    } else {
-      console.log("No 'subjects' collection found or already migrated.");
     }
 
-    // 2. Drop old indexes on 'papers' if any
-    try {
-      const paperIndexes = await db.collection("papers").indexes();
-      for (const idx of paperIndexes) {
-        if (idx.name !== "_id_" && !idx.name.includes("courseTitle")) {
-          if (idx.name.includes("subject") || idx.name.includes("title")) {
-            console.log(`Dropping old index: ${idx.name}`);
-            await db.collection("papers").dropIndex(idx.name);
-          }
-        }
-      }
-    } catch (err) {
-      console.log("Index drop note:", err.message);
-    }
-
-    // 3. Migrate papers collection
-    const papers = await db.collection("papers").find({}).toArray();
-    console.log(`Found ${papers.length} papers to migrate.`);
+    // 2. Migrate 'paper' collection
+    const papers = await db.collection("paper").find({}).toArray();
+    console.log(`Found ${papers.length} papers in 'paper' collection to migrate.`);
 
     let updatedCount = 0;
+    let duplicateCount = 0;
+
     for (const paper of papers) {
       const updateFields = {};
       const unsetFields = {
@@ -73,7 +58,6 @@ async function migrate() {
         pendingSubjectName: "",
       };
 
-      // Set courseTitle from subject if courseTitle is missing
       if (!paper.courseTitle && paper.subject) {
         updateFields.courseTitle = paper.subject;
       }
@@ -86,22 +70,42 @@ async function migrate() {
       if (paper.courseCode === undefined || paper.courseCode === null) {
         updateFields.courseCode = "";
       }
+      if (paper.courseCodePending === undefined) {
+        updateFields.courseCodePending = false;
+      }
+      if (paper.branchPending === undefined) {
+        updateFields.branchPending = false;
+      }
 
       const updateOp = { $unset: unsetFields };
       if (Object.keys(updateFields).length > 0) {
         updateOp.$set = updateFields;
       }
 
-      await db.collection("papers").updateOne({ _id: paper._id }, updateOp);
-      updatedCount++;
+      try {
+        await db.collection("paper").updateOne({ _id: paper._id }, updateOp);
+        updatedCount++;
+      } catch (err) {
+        if (err.code === 11000) {
+          console.log(`Duplicate paper detected for _id ${paper._id}. Cleaning up duplicate record.`);
+          await db.collection("paper").deleteOne({ _id: paper._id });
+          duplicateCount++;
+        } else {
+          throw err;
+        }
+      }
     }
 
-    console.log(`Migrated ${updatedCount} paper documents.`);
+    console.log(`Migrated ${updatedCount} paper documents. (Removed ${duplicateCount} exact duplicate(s)).`);
 
-    // 4. Ensure new indexes on Paper model
-    await Paper.syncIndexes();
-    await CourseTitle.syncIndexes();
-    console.log("Indexes synchronized successfully!");
+    // 3. Ensure new indexes on Paper model and CourseTitle model
+    try {
+      await Paper.syncIndexes();
+      await CourseTitle.syncIndexes();
+      console.log("Indexes synchronized successfully!");
+    } catch (idxErr) {
+      console.log("Index sync note:", idxErr.message);
+    }
 
     console.log("Migration complete!");
     process.exit(0);
