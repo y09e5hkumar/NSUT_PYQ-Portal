@@ -58,10 +58,10 @@ export default function Dashboard() {
             Reports queue ({stats.pending})
           </Link>
           <Link
-            to="/admin/branch-requests"
+            to="/admin/pending-review"
             className="text-sm bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 px-4 py-2 rounded-xl"
           >
-            Branch requests ({stats.pendingBranchCount || 0})
+            Pending review ({stats.pendingReviewCount || 0})
           </Link>
         </div>
       </div>
@@ -71,7 +71,7 @@ export default function Dashboard() {
         {[
           { label: "Total papers", value: stats.total, icon: "📄" },
           { label: "Pending reports", value: stats.pending, icon: "🚩" },
-          { label: "Pending branch requests", value: stats.pendingBranchCount || 0, icon: "🌿" },
+          { label: "Pending review", value: stats.pendingReviewCount || 0, icon: "🕐" },
           { label: "Total downloads", value: stats.totalDownloads, icon: "⬇️" },
         ].map((s) => (
           <div

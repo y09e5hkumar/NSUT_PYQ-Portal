@@ -10,6 +10,7 @@ import Dashboard from "./pages/admin/Dashboard";
 import ReviewQueue from "./pages/admin/ReviewQueue";
 import ReportsQueue from "./pages/admin/ReportsQueue";
 import BranchRequests from "./pages/admin/BranchRequests";
+import PendingReview from "./pages/admin/PendingReview";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AuthCallback from "./pages/AuthCallback";
 
@@ -62,6 +63,14 @@ export default function App() {
               element={
                 <ProtectedRoute adminOnly>
                   <BranchRequests />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/pending-review"
+              element={
+                <ProtectedRoute adminOnly>
+                  <PendingReview />
                 </ProtectedRoute>
               }
             />

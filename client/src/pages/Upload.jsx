@@ -4,181 +4,233 @@ import toast from "react-hot-toast";
 import { useNavigate, Link } from "react-router-dom";
 
 const EXAM_TYPES = ["Mid Sem", "End Sem", "Summer Sem"];
-const YEARS = [2026, 2025, 2024, 2023, 2022, 2021, 2020];
+const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
+const CURRENT_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: CURRENT_YEAR - 2014 }, (_, i) => CURRENT_YEAR - i);
 
-const FALLBACK_BRANCHES = [
-  "CSAI", "CSE", "CSDS", "IT", "ITNS", "MAC", "EIOT", "ECE", "EE", "ICE", "ME", "BT", "CSDA", "CIOT", "ECAM", "MEEV", "CE", "GI"
-];
+const NOT_LISTED = "__NOT_LISTED__";
+
+const inp =
+  "w-full border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 dark:focus:ring-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
+
+const label = "block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5";
 
 export default function Upload() {
-  const [step, setStep] = useState(1); // 1: Select File, 2: Review Extraction & Verification
-  const [file, setFile] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [geminiLoading, setGeminiLoading] = useState(false);
-
-  const [branches, setBranches] = useState(
-    FALLBACK_BRANCHES.map((b) => ({ code: b, fullName: b }))
-  );
-
-  const [tempFileRef, setTempFileRef] = useState("");
-  const [extractedText, setExtractedText] = useState("");
-  const [extractionSource, setExtractionSource] = useState("local");
-  const [confidence, setConfidence] = useState({});
-  const [editedFields, setEditedFields] = useState([]);
-  const [similarityCandidates, setSimilarityCandidates] = useState([]);
-  const [exactDuplicate, setExactDuplicate] = useState(null);
-
-  const [form, setForm] = useState({
-    title: "",
-    branch: "",
-    pendingBranchName: "",
-    semester: "",
-    subject: "",
-    courseCode: "",
-    courseTitle: "",
-    year: "",
-    examType: "",
-    degree: "B.Tech",
-  });
-
   const navigate = useNavigate();
 
+  // ── File ─────────────────────────────────────────────────────────────────────
+  const [file, setFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // ── Taxonomy data ─────────────────────────────────────────────────────────────
+  const [branches, setBranches] = useState([]);
+  const [subjects, setSubjects] = useState([]);
+  const [courseCodes, setCourseCodes] = useState([]);
+
+  // ── Form state ───────────────────────────────────────────────────────────────
+  const [degree] = useState("B.Tech");
+
+  // Branch
+  const [branchValue, setBranchValue] = useState("");   // dropdown value ("CSE" | NOT_LISTED | "")
+  const [branchIsNew, setBranchIsNew] = useState(false);
+  const [pendingBranchName, setPendingBranchName] = useState("");
+
+  // Semester
+  const [semester, setSemester] = useState("");
+
+  // Subject
+  const [subjectValue, setSubjectValue] = useState("");  // dropdown value (name | NOT_LISTED | "")
+  const [subjectId, setSubjectId] = useState(null);      // _id of chosen existing subject
+  const [subjectIsNew, setSubjectIsNew] = useState(false);
+  const [pendingSubjectName, setPendingSubjectName] = useState("");
+
+  // Course code
+  const [courseCodeValue, setCourseCodeValue] = useState(""); // dropdown value (code | NOT_LISTED | "")
+  const [courseCodeIsNew, setCourseCodeIsNew] = useState(false);
+  const [pendingCourseCodeName, setPendingCourseCodeName] = useState("");
+
+  // Exam / year / title
+  const [examType, setExamType] = useState("");
+  const [year, setYear] = useState("");
+  const [title, setTitle] = useState("");
+
+  // ── Duplicate pre-check ───────────────────────────────────────────────────────
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // null | paper doc
+
+  // ── Load branches ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    api
-      .get("/branches")
-      .then((r) => {
-        if (Array.isArray(r.data) && r.data.length > 0) {
-          setBranches(r.data);
-        }
-      })
-      .catch(() => {});
+    api.get("/branches").then((r) => {
+      if (Array.isArray(r.data)) setBranches(r.data);
+    }).catch(() => {});
   }, []);
 
-  const inp =
-    "w-full border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400";
+  // ── Load subjects when branch changes ─────────────────────────────────────────
+  const resolvedBranch = branchIsNew ? null : branchValue;
+  useEffect(() => {
+    // Reset downstream
+    setSubjectValue("");
+    setSubjectId(null);
+    setSubjectIsNew(false);
+    setPendingSubjectName("");
+    setCourseCodes([]);
+    setCourseCodeValue("");
+    setCourseCodeIsNew(false);
+    setPendingCourseCodeName("");
 
-  const handleFieldChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (!editedFields.includes(field)) {
-      setEditedFields((prev) => [...prev, field]);
+    if (!resolvedBranch) {
+      setSubjects([]);
+      return;
+    }
+    api.get(`/subjects?branch=${resolvedBranch}`).then((r) => {
+      setSubjects(Array.isArray(r.data) ? r.data : []);
+    }).catch(() => setSubjects([]));
+  }, [resolvedBranch]);
+
+  // ── Load course codes when subject changes ────────────────────────────────────
+  useEffect(() => {
+    // Reset downstream
+    setCourseCodeValue("");
+    setCourseCodeIsNew(false);
+    setPendingCourseCodeName("");
+
+    if (!subjectId || subjectIsNew) {
+      setCourseCodes([]);
+      return;
+    }
+    api.get(`/course-codes?subjectId=${subjectId}`).then((r) => {
+      setCourseCodes(Array.isArray(r.data) ? r.data : []);
+    }).catch(() => setCourseCodes([]));
+  }, [subjectId, subjectIsNew]);
+
+  // ── Duplicate pre-check (fires when all canonical fields are filled) ──────────
+  useEffect(() => {
+    const branch = resolvedBranch;
+    const subject = subjectIsNew ? pendingSubjectName : (subjectValue !== NOT_LISTED ? subjectValue : "");
+    const courseCode = courseCodeIsNew ? pendingCourseCodeName : (courseCodeValue !== NOT_LISTED ? courseCodeValue : "");
+
+    if (!branch || !semester || !subject || !examType || !year) {
+      setDuplicateWarning(null);
+      return;
+    }
+    // Only run pre-check when no field is pending
+    if (branchIsNew || subjectIsNew || courseCodeIsNew) {
+      setDuplicateWarning(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await api.post("/papers/check-duplicate", {
+          branch,
+          semester,
+          subject,
+          courseCode,
+          examType,
+          year,
+        });
+        setDuplicateWarning(data.isDuplicate ? data.existingPaper : null);
+      } catch {
+        setDuplicateWarning(null);
+      }
+    }, 600);
+
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedBranch, semester, subjectValue, pendingSubjectName, subjectIsNew, courseCodeValue, pendingCourseCodeName, courseCodeIsNew, examType, year]);
+
+  // ── Handlers ──────────────────────────────────────────────────────────────────
+
+  const handleBranchChange = (e) => {
+    const val = e.target.value;
+    if (val === NOT_LISTED) {
+      setBranchIsNew(true);
+      setBranchValue(NOT_LISTED);
+    } else {
+      setBranchIsNew(false);
+      setBranchValue(val);
+      setPendingBranchName("");
     }
   };
 
-  const handleExtractLocal = async (e) => {
+  const handleSubjectChange = (e) => {
+    const val = e.target.value;
+    if (val === NOT_LISTED) {
+      setSubjectIsNew(true);
+      setSubjectValue(NOT_LISTED);
+      setSubjectId(null);
+    } else {
+      setSubjectIsNew(false);
+      setSubjectValue(val);
+      // Find the matching subject _id for the course-code lookup
+      const found = subjects.find((s) => s.name === val);
+      setSubjectId(found?._id || null);
+      setPendingSubjectName("");
+    }
+  };
+
+  const handleCourseCodeChange = (e) => {
+    const val = e.target.value;
+    if (val === NOT_LISTED) {
+      setCourseCodeIsNew(true);
+      setCourseCodeValue(NOT_LISTED);
+    } else {
+      setCourseCodeIsNew(false);
+      setCourseCodeValue(val);
+      setPendingCourseCodeName("");
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!file) return toast.error("Please select a PDF file first.");
+
+    // ── Client-side validation ─────────────────────────────────────────────────
+    if (!file) return toast.error("Please attach a PDF file.");
+    if (!title.trim()) return toast.error("Paper title is required.");
+    if (!semester) return toast.error("Semester is required.");
+    if (!examType) return toast.error("Exam type is required.");
+    if (!year) return toast.error("Year is required.");
+
+    if (!branchIsNew && !branchValue) return toast.error("Branch is required.");
+    if (branchIsNew && !pendingBranchName.trim()) return toast.error("Please specify your unlisted branch name.");
+
+    const subjectText = subjectIsNew ? pendingSubjectName : subjectValue;
+    if (!subjectText || subjectText === NOT_LISTED) return toast.error("Subject is required.");
+    if (subjectIsNew && !pendingSubjectName.trim()) return toast.error("Please specify your unlisted subject name.");
 
     setLoading(true);
     try {
       const fd = new FormData();
       fd.append("pdf", file);
+      fd.append("title", title.trim());
+      fd.append("degree", degree);
+      fd.append("semester", semester);
+      fd.append("examType", examType);
+      fd.append("year", year);
 
-      const { data } = await api.post("/papers/extract", fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      // Branch
+      fd.append("branchIsNew", String(branchIsNew));
+      if (branchIsNew) {
+        fd.append("pendingBranchName", pendingBranchName.trim());
+      } else {
+        fd.append("branch", branchValue);
+      }
 
-      setTempFileRef(data.tempFileRef);
-      setExtractedText(data.extractedText || "");
-      setExtractionSource(data.extractionSource || "local");
-      setConfidence(data.confidence || {});
-      setSimilarityCandidates(data.similarityCandidates || []);
-      setExactDuplicate(data.exactDuplicate || null);
+      // Subject
+      fd.append("subjectIsNew", String(subjectIsNew));
+      if (subjectIsNew) {
+        fd.append("pendingSubjectName", pendingSubjectName.trim());
+      } else {
+        fd.append("subject", subjectValue);
+      }
 
-      const m = data.metadata || {};
-      const matchedBranch = m.branch || "";
-      const rawBranch = m.rawBranchText || "";
-
-      setForm({
-        title: m.courseTitle
-          ? `${m.courseTitle} ${m.examType || ""} ${m.year || ""}`.trim()
-          : file.name.replace(/\.pdf$/i, ""),
-        branch: matchedBranch ? matchedBranch : rawBranch ? "OTHER" : "",
-        pendingBranchName: matchedBranch ? "" : rawBranch,
-        semester: m.semester || "",
-        subject: m.subject || m.courseTitle || "",
-        courseCode: m.courseCode || "",
-        courseTitle: m.courseTitle || m.subject || "",
-        year: m.year || "",
-        examType: m.examType || "",
-        degree: m.degree || "B.Tech",
-      });
-
-      setStep(2);
-      toast.success("Metadata extracted! Please verify fields.");
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Extraction failed. Please fill metadata manually.");
-      setStep(2);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGeminiFallback = async () => {
-    if (!tempFileRef) return toast.error("File reference lost. Please select file again.");
-
-    setGeminiLoading(true);
-    try {
-      const { data } = await api.post("/papers/extract/gemini", { tempFileRef });
-
-      setExtractionSource("gemini");
-      setConfidence(data.confidence || {});
-      setSimilarityCandidates(data.similarityCandidates || []);
-      setExactDuplicate(data.exactDuplicate || null);
-
-      const m = data.metadata || {};
-      const matchedBranch = m.branch || "";
-      const rawBranch = m.rawBranchText || "";
-
-      setForm((prev) => ({
-        ...prev,
-        title: m.courseTitle ? `${m.courseTitle} ${m.examType || ""} ${m.year || ""}`.trim() : prev.title,
-        branch: matchedBranch ? matchedBranch : rawBranch ? "OTHER" : prev.branch,
-        pendingBranchName: matchedBranch ? "" : rawBranch || prev.pendingBranchName,
-        semester: m.semester || prev.semester,
-        subject: m.subject || m.courseTitle || prev.subject,
-        courseCode: m.courseCode || prev.courseCode,
-        courseTitle: m.courseTitle || prev.courseTitle,
-        year: m.year || prev.year,
-        examType: m.examType || prev.examType,
-        degree: m.degree || prev.degree,
-      }));
-
-      toast.success("Re-extracted metadata using Gemini AI!");
-    } catch (err) {
-      toast.error(err.response?.data?.message || "Gemini extraction failed.");
-    } finally {
-      setGeminiLoading(false);
-    }
-  };
-
-  const handleSubmitFinal = async (e) => {
-    e.preventDefault();
-
-    if (exactDuplicate) {
-      return toast.error("This paper already exists for this branch. Cannot upload duplicate.");
-    }
-
-    if (!form.branch || !form.semester || !form.subject || !form.year || !form.examType) {
-      return toast.error("Please fill in all required paper details.");
-    }
-
-    if (form.branch === "OTHER" && !form.pendingBranchName.trim()) {
-      return toast.error("Please specify your unlisted branch name.");
-    }
-
-    setLoading(true);
-    try {
-      const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-      fd.append("branchPending", form.branch === "OTHER" ? "true" : "false");
-      fd.append("tempFileRef", tempFileRef);
-      fd.append("extractedText", extractedText);
-      fd.append("extractionSource", extractionSource);
-      fd.append("editedFields", JSON.stringify(editedFields));
-      fd.append("confidence", JSON.stringify(confidence));
-
-      if (file && !tempFileRef) {
-        fd.append("pdf", file);
+      // Course code (optional)
+      fd.append("courseCodeIsNew", String(courseCodeIsNew));
+      if (courseCodeIsNew) {
+        if (pendingCourseCodeName.trim()) {
+          fd.append("pendingCourseCodeName", pendingCourseCodeName.trim());
+        }
+      } else if (courseCodeValue && courseCodeValue !== NOT_LISTED) {
+        fd.append("courseCode", courseCodeValue);
       }
 
       await api.post("/papers", fd, {
@@ -189,65 +241,242 @@ export default function Upload() {
       navigate("/");
     } catch (err) {
       if (err.response?.status === 409) {
-        toast.error("Duplicate detected! This paper is already uploaded.");
+        const existing = err.response.data?.existingPaper;
+        if (existing) {
+          toast.error(
+            <span>
+              Duplicate detected!{" "}
+              <Link to={`/paper/${existing._id}`} className="underline font-medium">
+                View existing paper
+              </Link>
+            </span>,
+            { duration: 6000 }
+          );
+        } else {
+          toast.error("This paper has already been uploaded.");
+        }
       } else {
-        toast.error(err.response?.data?.message || "Upload failed.");
+        toast.error(err.response?.data?.message || "Upload failed. Please try again.");
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const getConfBadge = (field) => {
-    const score = confidence[field];
-    if (score === undefined) return null;
-    if (score < 0.6) {
-      return (
-        <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-2 py-0.5 rounded-full ml-2">
-          ⚠️ Low confidence
-        </span>
-      );
-    }
-    return (
-      <span className="text-[10px] bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 px-2 py-0.5 rounded-full ml-2">
-        ✓ Auto-detected
-      </span>
-    );
-  };
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  const branchResolved = !branchIsNew && !!branchValue;
+  const subjectResolved = (!subjectIsNew && subjectValue && subjectValue !== NOT_LISTED) ||
+    (subjectIsNew && pendingSubjectName.trim());
 
   return (
     <div className="max-w-xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-2">Upload a paper</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        AI-assisted paper extraction & instant publishing pipeline.
+      <h1 className="text-2xl font-semibold mb-1">Upload a Paper</h1>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-8">
+        Fill in the details below. All fields marked <span className="text-red-500">*</span> are required.
       </p>
 
-      {/* Step Indicator */}
-      <div className="flex items-center gap-2 mb-8 text-xs font-medium">
-        <div
-          className={`flex-1 py-2 text-center rounded-lg border ${
-            step === 1
-              ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900 border-transparent"
-              : "bg-gray-100 dark:bg-gray-900 text-gray-400 border-gray-200 dark:border-gray-800"
-          }`}
-        >
-          1. Select File & Extract
-        </div>
-        <div
-          className={`flex-1 py-2 text-center rounded-lg border ${
-            step === 2
-              ? "bg-gray-900 text-white dark:bg-white dark:text-gray-900 border-transparent"
-              : "bg-gray-100 dark:bg-gray-900 text-gray-400 border-gray-200 dark:border-gray-800"
-          }`}
-        >
-          2. Verify & Publish
-        </div>
-      </div>
+      <form onSubmit={handleSubmit} className="space-y-5">
 
-      {step === 1 && (
-        <form onSubmit={handleExtractLocal} className="space-y-6">
-          <label className="block border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl p-10 text-center cursor-pointer hover:border-gray-400 dark:hover:border-gray-500 transition-colors bg-white dark:bg-gray-900">
+        {/* ── Duplicate warning banner ── */}
+        {duplicateWarning && (
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200">
+            <div className="font-semibold mb-1">⚠️ This paper may already exist</div>
+            <p>
+              A paper matching this branch / semester / subject / exam type / year was found:{" "}
+              <Link to={`/paper/${duplicateWarning._id}`} target="_blank" className="underline font-medium">
+                {duplicateWarning.title || "View paper"} ({duplicateWarning.year}) ↗
+              </Link>
+            </p>
+            <p className="mt-1 text-amber-700 dark:text-amber-300">
+              You can still submit if your paper is genuinely different.
+            </p>
+          </div>
+        )}
+
+        {/* ── Degree (fixed) ── */}
+        <div>
+          <label className={label}>Degree Program</label>
+          <input className={inp} value={degree} readOnly />
+        </div>
+
+        {/* ── Branch ── */}
+        <div>
+          <label className={label}>
+            Branch <span className="text-red-500">*</span>
+          </label>
+          <select id="branch-select" className={inp} value={branchValue} onChange={handleBranchChange} required={!branchIsNew}>
+            <option value="">Select branch…</option>
+            {branches.map((b) => (
+              <option key={b.code} value={b.code}>
+                {b.code} — {b.fullName}
+              </option>
+            ))}
+            <option value={NOT_LISTED}>Not listed / add new</option>
+          </select>
+        </div>
+
+        {branchIsNew && (
+          <div>
+            <label className="block text-xs font-medium text-amber-600 dark:text-amber-400 mb-1.5">
+              Specify unlisted branch name <span className="text-red-500">*</span>{" "}
+              <span className="font-normal">(will be reviewed by admin)</span>
+            </label>
             <input
+              id="pending-branch-input"
+              className={inp}
+              placeholder="e.g. AI & Data Science"
+              value={pendingBranchName}
+              onChange={(e) => setPendingBranchName(e.target.value)}
+              required
+            />
+          </div>
+        )}
+
+        {/* ── Semester ── */}
+        <div>
+          <label className={label}>
+            Semester <span className="text-red-500">*</span>
+          </label>
+          <select id="semester-select" className={inp} value={semester} onChange={(e) => setSemester(e.target.value)} required>
+            <option value="">Select semester…</option>
+            {SEMESTERS.map((s) => (
+              <option key={s} value={s}>Sem {s}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* ── Subject (cascades from Branch) ── */}
+        <div>
+          <label className={label}>
+            Subject <span className="text-red-500">*</span>
+          </label>
+          <select
+            id="subject-select"
+            className={inp}
+            value={subjectValue}
+            onChange={handleSubjectChange}
+            disabled={!branchResolved}
+            required={!subjectIsNew}
+          >
+            <option value="">{branchResolved ? "Select subject…" : "Select branch first"}</option>
+            {subjects.map((s) => (
+              <option key={s._id} value={s.name}>{s.name}</option>
+            ))}
+            <option value={NOT_LISTED}>Not listed / add new</option>
+          </select>
+        </div>
+
+        {subjectIsNew && (
+          <div>
+            <label className="block text-xs font-medium text-amber-600 dark:text-amber-400 mb-1.5">
+              Specify unlisted subject name <span className="text-red-500">*</span>{" "}
+              <span className="font-normal">(will be reviewed by admin)</span>
+            </label>
+            <input
+              id="pending-subject-input"
+              className={inp}
+              placeholder="e.g. Advanced Algorithms"
+              value={pendingSubjectName}
+              onChange={(e) => setPendingSubjectName(e.target.value)}
+              required
+            />
+          </div>
+        )}
+
+        {/* ── Course Code (cascades from Subject) ── */}
+        <div>
+          <label className={label}>Course Code</label>
+          <select
+            id="course-code-select"
+            className={inp}
+            value={courseCodeValue}
+            onChange={handleCourseCodeChange}
+            disabled={!subjectResolved || subjectIsNew}
+          >
+            <option value="">
+              {subjectIsNew
+                ? "Not available (new subject)"
+                : subjectResolved
+                ? "Select course code… (optional)"
+                : "Select subject first"}
+            </option>
+            {courseCodes.map((c) => (
+              <option key={c._id} value={c.code}>{c.code}</option>
+            ))}
+            {subjectResolved && !subjectIsNew && (
+              <option value={NOT_LISTED}>Not listed / add new</option>
+            )}
+          </select>
+        </div>
+
+        {courseCodeIsNew && (
+          <div>
+            <label className="block text-xs font-medium text-amber-600 dark:text-amber-400 mb-1.5">
+              Specify unlisted course code{" "}
+              <span className="font-normal">(will be reviewed by admin)</span>
+            </label>
+            <input
+              id="pending-course-code-input"
+              className={inp}
+              placeholder="e.g. CS-601"
+              value={pendingCourseCodeName}
+              onChange={(e) => setPendingCourseCodeName(e.target.value.toUpperCase())}
+            />
+          </div>
+        )}
+
+        {/* ── Exam type + Year ── */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={label}>
+              Exam Type <span className="text-red-500">*</span>
+            </label>
+            <select id="exam-type-select" className={inp} value={examType} onChange={(e) => setExamType(e.target.value)} required>
+              <option value="">Select…</option>
+              {EXAM_TYPES.map((t) => (
+                <option key={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={label}>
+              Year <span className="text-red-500">*</span>
+            </label>
+            <select id="year-select" className={inp} value={year} onChange={(e) => setYear(e.target.value)} required>
+              <option value="">Select…</option>
+              {YEARS.map((y) => (
+                <option key={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* ── Paper Title ── */}
+        <div>
+          <label className={label}>
+            Paper Title <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="paper-title-input"
+            className={inp}
+            placeholder="e.g. DBMS End Sem 2024"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            required
+          />
+        </div>
+
+        {/* ── PDF File ── */}
+        <div>
+          <label className={label}>
+            PDF File <span className="text-red-500">*</span>
+          </label>
+          <label
+            htmlFor="pdf-file-input"
+            className="flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-600 transition-colors bg-white dark:bg-gray-900"
+          >
+            <input
+              id="pdf-file-input"
               type="file"
               accept=".pdf"
               className="hidden"
@@ -256,250 +485,52 @@ export default function Upload() {
             {file ? (
               <div className="space-y-1">
                 <span className="text-2xl block">📄</span>
-                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                  {file.name}
-                </span>
-                <span className="text-xs text-gray-400 block">
-                  {(file.size / (1024 * 1024)).toFixed(2)} MB
-                </span>
+                <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{file.name}</span>
+                <span className="text-xs text-gray-400 block">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
               </div>
             ) : (
               <div className="space-y-2">
                 <span className="text-3xl block">📤</span>
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300 block">
-                  Click to select PDF paper
+                  Click to select PDF
                 </span>
-                <span className="text-xs text-gray-400 block">
-                  Supports scanned and digital PDFs (max 20 MB)
-                </span>
+                <span className="text-xs text-gray-400 block">Scanned or digital PDFs · max 20 MB</span>
               </div>
             )}
           </label>
+        </div>
 
-          <button
-            type="submit"
-            disabled={!file || loading}
-            className="w-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3.5 rounded-xl text-sm font-medium hover:opacity-80 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2"
-          >
-            {loading ? "Extracting metadata…" : "Extract Metadata →"}
-          </button>
-        </form>
-      )}
+        {/* ── Pending fields notice ── */}
+        {(branchIsNew || subjectIsNew || courseCodeIsNew) && (
+          <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs text-indigo-700 dark:text-indigo-300">
+            <span className="font-semibold">ℹ️ Note:</span> Your paper will publish immediately but{" "}
+            {[branchIsNew && "branch", subjectIsNew && "subject", courseCodeIsNew && "course code"]
+              .filter(Boolean)
+              .join(", ")}{" "}
+            will be reviewed by an admin. The paper won't appear in filtered search results until resolved.
+          </div>
+        )}
 
-      {step === 2 && (
-        <form onSubmit={handleSubmitFinal} className="space-y-5">
-          {/* Exact Duplicate Warning */}
-          {exactDuplicate && (
-            <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl text-xs text-red-700 dark:text-red-300">
-              <div className="font-semibold mb-1">🚫 Duplicate Paper Detected</div>
-              <p>
-                An identical paper content already exists for branch <strong>{exactDuplicate.branch}</strong>:{" "}
-                <Link to={`/paper/${exactDuplicate._id}`} className="underline font-medium">
-                  {exactDuplicate.title} ({exactDuplicate.year})
-                </Link>
-              </p>
-            </div>
+        {/* ── Submit ── */}
+        <button
+          id="upload-submit-btn"
+          type="submit"
+          disabled={loading}
+          className="w-full bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3.5 rounded-xl text-sm font-medium hover:opacity-80 disabled:opacity-50 transition-opacity flex items-center justify-center gap-2"
+        >
+          {loading ? (
+            <>
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              Publishing…
+            </>
+          ) : (
+            "Submit & Publish Paper 🚀"
           )}
-
-          {/* Similarity Candidate Warning Banner */}
-          {!exactDuplicate && similarityCandidates.length > 0 && (
-            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-xl text-xs text-amber-800 dark:text-amber-200">
-              <div className="font-semibold mb-1">⚠️ Similar Papers Exist</div>
-              <p className="mb-2">
-                We found similar papers for <strong>{form.branch}</strong>. Please check to avoid duplicates:
-              </p>
-              <div className="space-y-1">
-                {similarityCandidates.map((c) => (
-                  <Link
-                    key={c._id}
-                    to={`/paper/${c._id}`}
-                    target="_blank"
-                    className="block hover:underline text-amber-900 dark:text-amber-100 font-medium"
-                  >
-                    • {c.title} ({c.year} - {c.examType}) ↗
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Gemini Fallback Trigger Banner */}
-          <div className="flex items-center justify-between p-3 bg-gray-100 dark:bg-gray-900 rounded-xl text-xs border border-gray-200 dark:border-gray-800">
-            <div>
-              <span className="font-medium text-gray-700 dark:text-gray-300">
-                Extraction Source: {extractionSource === "gemini" ? "✨ Gemini AI" : "⚙️ Local OCR"}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleGeminiFallback}
-              disabled={geminiLoading}
-              className="text-indigo-600 dark:text-indigo-400 font-medium hover:underline disabled:opacity-50"
-            >
-              {geminiLoading ? "Running Gemini AI…" : "Not correct? Try Gemini AI ✨"}
-            </button>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
-              Paper Title {getConfBadge("courseTitle")}
-            </label>
-            <input
-              className={inp}
-              placeholder="Paper title e.g. DBMS End Sem 2024"
-              value={form.title}
-              onChange={(e) => handleFieldChange("title", e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Branch {getConfBadge("branch")}
-              </label>
-              <select
-                className={inp}
-                value={form.branch}
-                onChange={(e) => handleFieldChange("branch", e.target.value)}
-                required
-              >
-                <option value="">Select Branch</option>
-                {branches.map((b) => (
-                  <option key={b.code} value={b.code}>
-                    {b.code} — {b.fullName}
-                  </option>
-                ))}
-                <option value="OTHER">Other / not listed</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Semester {getConfBadge("semester")}
-              </label>
-              <select
-                className={inp}
-                value={form.semester}
-                onChange={(e) => handleFieldChange("semester", e.target.value)}
-                required
-              >
-                <option value="">Semester</option>
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
-                  <option key={s} value={s}>
-                    Sem {s}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Unlisted Branch Text Field */}
-          {form.branch === "OTHER" && (
-            <div>
-              <label className="block text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">
-                Specify Unlisted Branch Name (Flagged for Admin Review)
-              </label>
-              <input
-                className={inp}
-                placeholder="e.g. AI & Data Science"
-                value={form.pendingBranchName}
-                onChange={(e) => handleFieldChange("pendingBranchName", e.target.value)}
-                required
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
-              Subject Name {getConfBadge("subject")}
-            </label>
-            <input
-              className={inp}
-              placeholder="Subject name"
-              value={form.subject}
-              onChange={(e) => handleFieldChange("subject", e.target.value)}
-              required
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Course Code {getConfBadge("courseCode")}
-              </label>
-              <input
-                className={inp}
-                placeholder="e.g. CS-301"
-                value={form.courseCode}
-                onChange={(e) => handleFieldChange("courseCode", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Degree Program {getConfBadge("degree")}
-              </label>
-              <input
-                className={inp}
-                placeholder="e.g. B.Tech"
-                value={form.degree}
-                onChange={(e) => handleFieldChange("degree", e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Year {getConfBadge("year")}
-              </label>
-              <select
-                className={inp}
-                value={form.year}
-                onChange={(e) => handleFieldChange("year", e.target.value)}
-                required
-              >
-                <option value="">Year</option>
-                {YEARS.map((y) => (
-                  <option key={y}>{y}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Exam Type {getConfBadge("examType")}
-              </label>
-              <select
-                className={inp}
-                value={form.examType}
-                onChange={(e) => handleFieldChange("examType", e.target.value)}
-                required
-              >
-                <option value="">Exam type</option>
-                {EXAM_TYPES.map((t) => (
-                  <option key={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              ← Back
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !!exactDuplicate}
-              className="flex-1 bg-gray-900 dark:bg-white text-white dark:text-gray-900 py-3 rounded-xl text-sm font-medium hover:opacity-80 disabled:opacity-50 transition-opacity"
-            >
-              {loading ? "Publishing…" : "Submit & Publish Paper 🚀"}
-            </button>
-          </div>
-        </form>
-      )}
+        </button>
+      </form>
     </div>
   );
 }

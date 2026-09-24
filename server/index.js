@@ -50,6 +50,8 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/papers', require('./routes/paperRoutes'));
 app.use('/api/branches', require('./routes/branchRoutes'));
+app.use('/api/subjects', require('./routes/subjectRoutes'));
+app.use('/api/course-codes', require('./routes/courseCodeRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 
 app.use((err, req, res, next) => {

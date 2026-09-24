@@ -1,14 +1,25 @@
 const Report = require("../models/Report");
 const Paper = require("../models/Paper");
+const Subject = require("../models/Subject");
+const CourseCode = require("../models/CourseCode");
+const Branch = require("../models/Branch");
 const { resolveReport } = require("../services/reportService");
-const { checkDuplicate, checkMetadataSimilarity } = require("../services/dedupService");
 const {
   addBranch,
   addAlias,
   resolvePendingBranches,
   getAllActiveBranches,
 } = require("../services/branchService");
-const Branch = require("../models/Branch");
+const {
+  addSubject,
+  resolvePendingSubjects,
+  addCourseCode,
+  resolvePendingCourseCodes,
+  getPendingSubjects,
+  getPendingCourseCodes,
+} = require("../services/taxonomyService");
+
+// ─── Community Reports ────────────────────────────────────────────────────────
 
 exports.getReports = async (req, res) => {
   const { status = "pending" } = req.query;
@@ -33,28 +44,17 @@ exports.getReportById = async (req, res) => {
     return res.status(404).json({ message: "Report not found" });
   }
 
-  let dedupCheck = null;
-  if (report.paper && report.paper.contentHash && report.paper.branch) {
-    const exactDuplicate = await checkDuplicate(report.paper.contentHash, report.paper.branch);
-    const similarityCandidates = await checkMetadataSimilarity(
-      {
-        courseCode: report.paper.courseCode,
-        subject: report.paper.subject,
-        semester: report.paper.semester,
-      },
-      report.paper.branch
-    );
-    dedupCheck = { exactDuplicate, similarityCandidates };
-  }
-
-  res.json({ report, dedupCheck });
+  res.json({ report });
 };
 
 exports.resolveReportApi = async (req, res) => {
   const { resolution, updatedMetadata } = req.body;
   const reportId = req.params.id;
 
-  if (!resolution || !["dismissed", "metadata_corrected", "paper_removed"].includes(resolution)) {
+  if (
+    !resolution ||
+    !["dismissed", "metadata_corrected", "paper_removed"].includes(resolution)
+  ) {
     return res.status(400).json({ message: "Valid resolution is required" });
   }
 
@@ -71,7 +71,8 @@ exports.resolveReportApi = async (req, res) => {
   }
 };
 
-// Branch Management APIs
+// ─── Branch Taxonomy Management ───────────────────────────────────────────────
+
 exports.createBranchApi = async (req, res) => {
   const { code, fullName, aliases } = req.body;
   if (!code || !fullName) {
@@ -114,7 +115,11 @@ exports.updateBranchApi = async (req, res) => {
     if (isActive !== undefined) update.isActive = isActive;
     if (Array.isArray(aliases)) update.aliases = aliases;
 
-    const branch = await Branch.findOneAndUpdate({ code: code.toUpperCase() }, update, { new: true });
+    const branch = await Branch.findOneAndUpdate(
+      { code: code.toUpperCase() },
+      update,
+      { new: true }
+    );
     if (!branch) {
       return res.status(404).json({ message: "Branch not found." });
     }
@@ -130,13 +135,10 @@ exports.getPendingBranchesApi = async (req, res) => {
       .sort({ createdAt: -1 })
       .populate("uploadedBy", "name email");
 
-    // Group papers by pendingBranchName
     const grouped = {};
     for (const paper of pendingPapers) {
       const name = paper.pendingBranchName || "Unlisted Branch";
-      if (!grouped[name]) {
-        grouped[name] = [];
-      }
+      if (!grouped[name]) grouped[name] = [];
       grouped[name].push(paper);
     }
 
@@ -160,17 +162,151 @@ exports.resolvePendingBranchApi = async (req, res) => {
   }
 
   try {
-    const result = await resolvePendingBranches({
-      pendingName,
-      action,
-      targetCode,
-      newBranchData,
-    });
+    const result = await resolvePendingBranches({ pendingName, action, targetCode, newBranchData });
     res.json({
       message: `Resolved ${result.resolvedCount} paper(s) to branch code ${result.canonicalCode}`,
       result,
     });
   } catch (err) {
     res.status(500).json({ message: err.message || "Failed to resolve pending branch." });
+  }
+};
+
+// ─── Subject Taxonomy Management ─────────────────────────────────────────────
+
+exports.getPendingSubjectsApi = async (req, res) => {
+  try {
+    const result = await getPendingSubjects();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch pending subjects." });
+  }
+};
+
+exports.resolvePendingSubjectApi = async (req, res) => {
+  const { pendingName, branch, action, canonicalName } = req.body;
+
+  if (!pendingName || !branch || !action || !["create_new", "map_existing"].includes(action)) {
+    return res.status(400).json({ message: "pendingName, branch, and action are required." });
+  }
+  if (!canonicalName) {
+    return res.status(400).json({ message: "canonicalName is required." });
+  }
+
+  try {
+    const result = await resolvePendingSubjects({ pendingName, branch, canonicalName });
+
+    // Check for newly-created metadata collisions (if subject resolved creates a dedup conflict)
+    res.json({
+      message: `Resolved ${result.resolvedCount} paper(s) to subject "${result.canonicalName}"`,
+      result,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to resolve pending subject." });
+  }
+};
+
+exports.createSubjectApi = async (req, res) => {
+  const { name, branch, semester } = req.body;
+  if (!name || !branch) {
+    return res.status(400).json({ message: "name and branch are required." });
+  }
+
+  try {
+    const subject = await addSubject({ name, branch, semester });
+    res.status(201).json({ message: "Subject created", subject });
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to create subject." });
+  }
+};
+
+exports.getSubjectsApi = async (req, res) => {
+  const { branch } = req.query;
+  const filter = { isActive: true };
+  if (branch) filter.branch = branch.toUpperCase();
+
+  const subjects = await Subject.find(filter).sort({ branch: 1, name: 1 });
+  res.json(subjects);
+};
+
+// ─── CourseCode Taxonomy Management ──────────────────────────────────────────
+
+exports.getPendingCourseCodesApi = async (req, res) => {
+  try {
+    const result = await getPendingCourseCodes();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch pending course codes." });
+  }
+};
+
+exports.resolvePendingCourseCodeApi = async (req, res) => {
+  const { pendingCode, branch, subjectName, action, canonicalCode } = req.body;
+
+  if (!pendingCode || !branch || !action || !["create_new", "map_existing"].includes(action)) {
+    return res.status(400).json({ message: "pendingCode, branch, and action are required." });
+  }
+  if (!canonicalCode) {
+    return res.status(400).json({ message: "canonicalCode is required." });
+  }
+
+  try {
+    const result = await resolvePendingCourseCodes({
+      pendingCode,
+      branch,
+      subjectName,
+      canonicalCode,
+    });
+    res.json({
+      message: `Resolved ${result.resolvedCount} paper(s) to course code "${result.canonicalCode}"`,
+      result,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to resolve pending course code." });
+  }
+};
+
+exports.createCourseCodeApi = async (req, res) => {
+  const { code, subjectId } = req.body;
+  if (!code || !subjectId) {
+    return res.status(400).json({ message: "code and subjectId are required." });
+  }
+
+  try {
+    const cc = await addCourseCode({ code, subjectId });
+    res.status(201).json({ message: "Course code created", courseCode: cc });
+  } catch (err) {
+    res.status(500).json({ message: err.message || "Failed to create course code." });
+  }
+};
+
+// ─── Unified Pending-Review Queue ─────────────────────────────────────────────
+
+exports.getPendingReviewApi = async (req, res) => {
+  try {
+    const [branches, subjects, courseCodes] = await Promise.all([
+      (async () => {
+        const papers = await Paper.find({ branchPending: true })
+          .sort({ createdAt: -1 })
+          .populate("uploadedBy", "name email");
+        const grouped = {};
+        for (const paper of papers) {
+          const name = paper.pendingBranchName || "Unlisted Branch";
+          if (!grouped[name]) grouped[name] = [];
+          grouped[name].push(paper);
+        }
+        return Object.entries(grouped).map(([pendingName, papers]) => ({
+          pendingName,
+          count: papers.length,
+          papers,
+        }));
+      })(),
+      getPendingSubjects(),
+      getPendingCourseCodes(),
+    ]);
+
+    res.json({ branches, subjects, courseCodes });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch pending review queue." });
   }
 };

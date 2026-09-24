@@ -1,18 +1,12 @@
-const crypto = require("crypto");
 const Paper = require("../models/Paper");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
-const { extractTextAndMetadata } = require("../services/ocrService");
-const { extractMetadataWithGemini } = require("../services/geminiService");
-const {
-  normalizeText,
-  computeContentHash,
-  checkDuplicate,
-  checkMetadataSimilarity,
-} = require("../services/dedupService");
+const { checkDuplicate } = require("../services/dedupService");
 const { resolveBranch } = require("../services/branchService");
+const { resolveSubject, resolveCourseCode } = require("../services/taxonomyService");
 const { createReport } = require("../services/reportService");
-const { saveTempFile, getTempFile, deleteTempFile } = require("../utils/tempStorage");
+
+// ─── Cloudinary helper ────────────────────────────────────────────────────────
 
 const uploadToCloudinary = (buffer) => {
   return new Promise((resolve, reject) => {
@@ -33,8 +27,7 @@ const uploadToCloudinary = (buffer) => {
   });
 };
 
-const hashBuffer = (buffer) =>
-  crypto.createHash("sha256").update(buffer).digest("hex");
+// ─── GET /api/papers ──────────────────────────────────────────────────────────
 
 exports.getPapers = async (req, res) => {
   const {
@@ -43,15 +36,19 @@ exports.getPapers = async (req, res) => {
     subject,
     year,
     examType,
+    courseCode,
     search,
     page = 1,
     limit = 20,
   } = req.query;
 
-  // Show papers that are approved or flagged, excluding unresolved pending branch requests
+  // Exclude all papers with any unresolved pending flag from default results.
+  // This prevents half-resolved papers appearing with blank/unlisted field values.
   const filter = {
     status: { $in: ["approved", "flagged"] },
-    branchPending: { $ne: true },
+    branchPending: false,
+    subjectPending: false,
+    courseCodePending: false,
   };
 
   if (branch) filter.branch = branch.toUpperCase();
@@ -59,6 +56,7 @@ exports.getPapers = async (req, res) => {
   if (subject) filter.subject = new RegExp(subject, "i");
   if (year) filter.year = Number(year);
   if (examType) filter.examType = examType;
+  if (courseCode) filter.courseCode = courseCode.toUpperCase();
   if (search) filter.$text = { $search: search };
 
   const total = await Paper.countDocuments(filter);
@@ -71,214 +69,248 @@ exports.getPapers = async (req, res) => {
   res.json({ papers, total, pages: Math.ceil(total / limit) });
 };
 
-exports.extractPaper = async (req, res) => {
-  if (!req.file?.buffer) {
-    return res.status(400).json({ message: "No PDF file uploaded" });
-  }
-
-  const tempFileRef = saveTempFile(req.file.buffer);
-  const { extractedText, metadata, confidence } = await extractTextAndMetadata(req.file.buffer);
-  const contentHash = computeContentHash(extractedText || req.file.originalname);
-
-  const exactDuplicate = metadata.branch ? await checkDuplicate(contentHash, metadata.branch) : null;
-  const similarityCandidates = metadata.branch ? await checkMetadataSimilarity(metadata, metadata.branch) : [];
-
-  res.json({
-    tempFileRef,
-    extractedText,
-    metadata,
-    confidence,
-    contentHash,
-    exactDuplicate,
-    similarityCandidates,
-    extractionSource: "local",
-  });
-};
-
-exports.extractPaperGemini = async (req, res) => {
-  const { tempFileRef } = req.body;
-  if (!tempFileRef) {
-    return res.status(400).json({ message: "tempFileRef is required" });
-  }
-
-  const pdfBuffer = getTempFile(tempFileRef);
-  if (!pdfBuffer) {
-    return res.status(400).json({ message: "Temporary file expired or not found. Please re-upload PDF." });
-  }
-
-  const result = await extractMetadataWithGemini(pdfBuffer);
-  if (!result.success) {
-    return res.status(400).json({ message: result.error || "Gemini extraction failed." });
-  }
-
-  const { extractedText, metadata, confidence } = result.data;
-  if (metadata.branch) {
-    const branchRes = await resolveBranch(metadata.branch);
-    if (branchRes.matched) {
-      metadata.branch = branchRes.code;
-    } else {
-      metadata.rawBranchText = metadata.branch;
-      metadata.branch = "";
-    }
-  }
-
-  const contentHash = computeContentHash(extractedText);
-  const exactDuplicate = metadata.branch ? await checkDuplicate(contentHash, metadata.branch) : null;
-  const similarityCandidates = metadata.branch ? await checkMetadataSimilarity(metadata, metadata.branch) : [];
-
-  res.json({
-    tempFileRef,
-    extractedText,
-    metadata,
-    confidence,
-    contentHash,
-    exactDuplicate,
-    similarityCandidates,
-    extractionSource: "gemini",
-  });
-};
+// ─── POST /api/papers/check-duplicate ────────────────────────────────────────
+// Non-blocking pre-check shown as a UX banner before final submit.
+// Server re-runs this on actual submit too — never trust the client check alone.
 
 exports.checkDuplicateApi = async (req, res) => {
-  const { contentHash, branch, metadata } = req.body;
-  const exactDuplicate = branch ? await checkDuplicate(contentHash, branch) : null;
-  const similarityCandidates = branch ? await checkMetadataSimilarity(metadata || {}, branch) : [];
+  const { branch, semester, subject, courseCode, examType, year } = req.body;
+
+  const duplicate = await checkDuplicate({
+    branch,
+    semester,
+    subject,
+    courseCode,
+    examType,
+    year,
+  });
 
   res.json({
-    isDuplicate: !!exactDuplicate,
-    exactDuplicate,
-    similarityCandidates,
+    isDuplicate: !!duplicate,
+    existingPaper: duplicate || null,
   });
 };
+
+// ─── POST /api/papers ─────────────────────────────────────────────────────────
 
 exports.uploadPaper = async (req, res) => {
   const {
     title,
+    degree = "B.Tech",
+    // Branch
     branch,
-    branchPending,
+    branchIsNew,            // "true" | "false" — did the student select "Not listed"?
     pendingBranchName,
+    // Semester / Exam
     semester,
-    subject,
-    year,
     examType,
+    year,
+    // Subject
+    subject,
+    subjectIsNew,           // "true" | "false"
+    pendingSubjectName,
+    // Course code
     courseCode,
-    courseTitle,
-    degree,
-    extractedText,
-    extractionSource = "local",
-    editedFields = [],
-    confidence = {},
-    tempFileRef,
+    courseCodeIsNew,        // "true" | "false"
+    pendingCourseCodeName,
   } = req.body;
 
-  let buffer;
-  if (req.file?.buffer) {
-    buffer = req.file.buffer;
-  } else if (tempFileRef) {
-    buffer = getTempFile(tempFileRef);
+  // ── 1. Basic required-field validation ──────────────────────────────────────
+  if (!title || !title.trim()) {
+    return res.status(400).json({ message: "Paper title is required." });
+  }
+  if (!semester) {
+    return res.status(400).json({ message: "Semester is required." });
+  }
+  if (!examType) {
+    return res.status(400).json({ message: "Exam type is required." });
+  }
+  if (!year) {
+    return res.status(400).json({ message: "Year is required." });
   }
 
-  if (!buffer) {
-    return res.status(400).json({ message: "No PDF file or temp file provided" });
+  const parsedBranchIsNew = branchIsNew === "true" || branchIsNew === true;
+  const parsedSubjectIsNew = subjectIsNew === "true" || subjectIsNew === true;
+  const parsedCourseCodeIsNew = courseCodeIsNew === "true" || courseCodeIsNew === true;
+
+  // ── 2. Resolve Branch ───────────────────────────────────────────────────────
+  let finalBranch = null;
+  let isBranchPending = false;
+  let finalPendingBranchName = null;
+
+  if (parsedBranchIsNew) {
+    // Student typed a new branch name
+    if (!pendingBranchName || !pendingBranchName.trim()) {
+      return res.status(400).json({ message: "Please specify your unlisted branch name." });
+    }
+    // Race-condition guard: check it doesn't already exist
+    const existing = await resolveBranch(pendingBranchName.trim());
+    if (existing.matched) {
+      // It matched an alias — use the canonical code instead
+      finalBranch = existing.code;
+      isBranchPending = false;
+    } else {
+      finalBranch = null;
+      isBranchPending = true;
+      finalPendingBranchName = pendingBranchName.trim();
+    }
+  } else {
+    if (!branch || !branch.trim()) {
+      return res.status(400).json({ message: "Branch is required." });
+    }
+    finalBranch = branch.trim().toUpperCase();
+    isBranchPending = false;
   }
 
-  const isBranchPending =
-    branchPending === true ||
-    branchPending === "true" ||
-    branch === "OTHER" ||
-    !branch;
+  // ── 3. Resolve Subject ──────────────────────────────────────────────────────
+  let finalSubject = null;
+  let isSubjectPending = false;
+  let finalPendingSubjectName = null;
 
-  const finalBranchCode = isBranchPending ? null : branch.toUpperCase();
-  const finalPendingBranchName = isBranchPending
-    ? pendingBranchName || "Unlisted Branch"
-    : null;
+  const subjectInput = parsedSubjectIsNew ? (pendingSubjectName || "").trim() : (subject || "").trim();
 
-  const fileHash = hashBuffer(buffer);
+  if (!subjectInput) {
+    return res.status(400).json({ message: "Subject is required." });
+  }
 
-  // SERVER-SIDE MANDATORY DEDUP RE-CHECK
-  const textForHash = extractedText && extractedText.trim().length > 10
-    ? extractedText
-    : title + " " + (subject || "") + " " + (courseCode || "");
+  if (parsedSubjectIsNew) {
+    // Race-condition guard: check it doesn't already exist under this branch
+    const branchForCheck = finalBranch || (finalPendingBranchName ? "PENDING" : null);
+    const existingSubject = branchForCheck && branchForCheck !== "PENDING"
+      ? await resolveSubject(subjectInput, branchForCheck)
+      : null;
 
-  const contentHash = computeContentHash(textForHash);
+    if (existingSubject) {
+      // Snapped to existing canonical subject
+      finalSubject = existingSubject.name;
+      isSubjectPending = false;
+    } else {
+      finalSubject = subjectInput;
+      isSubjectPending = true;
+      finalPendingSubjectName = subjectInput;
+    }
+  } else {
+    finalSubject = subjectInput;
+    isSubjectPending = false;
+  }
 
-  if (finalBranchCode) {
-    const existingDuplicate = await checkDuplicate(contentHash, finalBranchCode);
-    if (existingDuplicate) {
-      if (tempFileRef) deleteTempFile(tempFileRef);
+  // ── 4. Resolve CourseCode ───────────────────────────────────────────────────
+  let finalCourseCode = null;
+  let isCourseCodePending = false;
+  let finalPendingCourseCodeName = null;
+
+  const codeInput = parsedCourseCodeIsNew
+    ? (pendingCourseCodeName || "").trim().toUpperCase()
+    : (courseCode || "").trim().toUpperCase();
+
+  if (codeInput) {
+    if (parsedCourseCodeIsNew) {
+      // Pending: subject itself may also be pending, skip canonical lookup in that case
+      if (!isSubjectPending && finalBranch) {
+        // Try to find subject doc
+        const SubjectModel = require("../models/Subject");
+        const subjectDoc = await SubjectModel.findOne({
+          name: new RegExp(`^${finalSubject}$`, "i"),
+          branch: finalBranch,
+          isActive: true,
+        });
+        const existingCode = subjectDoc
+          ? await resolveCourseCode(codeInput, subjectDoc._id)
+          : null;
+
+        if (existingCode) {
+          finalCourseCode = existingCode.code;
+          isCourseCodePending = false;
+        } else {
+          finalCourseCode = codeInput;
+          isCourseCodePending = true;
+          finalPendingCourseCodeName = codeInput;
+        }
+      } else {
+        // Subject is also pending — just flag course code as pending too
+        finalCourseCode = codeInput;
+        isCourseCodePending = true;
+        finalPendingCourseCodeName = codeInput;
+      }
+    } else {
+      finalCourseCode = codeInput;
+      isCourseCodePending = false;
+    }
+  }
+
+  // ── 5. Server-side duplicate re-check ───────────────────────────────────────
+  // Only applicable when all three fields are canonical (not pending)
+  if (!isBranchPending && !isSubjectPending && !isCourseCodePending) {
+    const duplicate = await checkDuplicate({
+      branch: finalBranch,
+      semester,
+      subject: finalSubject,
+      courseCode: finalCourseCode,
+      examType,
+      year,
+    });
+
+    if (duplicate) {
       return res.status(409).json({
-        message: "This paper content has already been uploaded for this branch.",
-        existingPaper: existingDuplicate,
+        message: "This paper has already been uploaded.",
+        existingPaper: duplicate,
       });
     }
   }
 
-  let result;
+  // ── 6. Require PDF ──────────────────────────────────────────────────────────
+  if (!req.file?.buffer) {
+    return res.status(400).json({ message: "No PDF file uploaded." });
+  }
+
+  // ── 7. Upload to Cloudinary ─────────────────────────────────────────────────
+  let cloudinaryResult;
   try {
-    result = await uploadToCloudinary(buffer);
+    cloudinaryResult = await uploadToCloudinary(req.file.buffer);
   } catch (err) {
     console.error("Cloudinary upload failed:", err.message);
     return res.status(502).json({ message: "File upload failed, please try again." });
   }
 
-  let parsedEditedFields = editedFields;
-  if (typeof editedFields === "string") {
-    try {
-      parsedEditedFields = JSON.parse(editedFields);
-    } catch (e) {
-      parsedEditedFields = [];
-    }
-  }
-
-  let parsedConfidence = confidence;
-  if (typeof confidence === "string") {
-    try {
-      parsedConfidence = JSON.parse(confidence);
-    } catch (e) {
-      parsedConfidence = {};
-    }
-  }
-
+  // ── 8. Create Paper document ────────────────────────────────────────────────
   try {
     const paper = await Paper.create({
-      title: title || `${subject} ${examType} ${year}`,
-      branch: finalBranchCode,
+      title: title.trim(),
+      degree,
+      branch: finalBranch,
       branchPending: isBranchPending,
       pendingBranchName: finalPendingBranchName,
       semester: Number(semester),
-      subject: subject || title,
-      year: Number(year),
+      subject: finalSubject,
+      subjectPending: isSubjectPending,
+      pendingSubjectName: finalPendingSubjectName,
+      courseCode: finalCourseCode,
+      courseCodePending: isCourseCodePending,
+      pendingCourseCodeName: finalPendingCourseCodeName,
       examType,
-      courseCode: courseCode || "",
-      courseTitle: courseTitle || subject || title,
-      degree: degree || "B.Tech",
-      pdfUrl: result.secure_url,
-      cloudinaryId: result.public_id,
-      fileHash,
-      contentHash,
-      extractedText: extractedText || "",
-      extractionSource,
-      extractionConfidence: parsedConfidence,
-      editedFields: parsedEditedFields,
-      uploadedBy: req.user?._id,
-      status: "approved", // Live post-submission!
+      year: Number(year),
+      pdfUrl: cloudinaryResult.secure_url,
+      cloudinaryId: cloudinaryResult.public_id,
+      uploadedBy: req.user._id,
+      status: "approved", // Publish immediately; pending flags handle admin queue
     });
-
-    if (tempFileRef) deleteTempFile(tempFileRef);
 
     res.status(201).json(paper);
   } catch (err) {
-    if (err.code === 11000 && (err.keyPattern?.contentHash || err.keyPattern?.fileHash)) {
-      await cloudinary.uploader.destroy(result.public_id, {
+    // Metadata uniqueness constraint violation (race condition on concurrent submits)
+    if (err.code === 11000) {
+      await cloudinary.uploader.destroy(cloudinaryResult.public_id, {
         resource_type: "raw",
       });
-      if (tempFileRef) deleteTempFile(tempFileRef);
       return res.status(409).json({
-        message: "This paper content has already been uploaded for this branch.",
+        message: "This paper has already been uploaded.",
       });
     }
     throw err;
   }
 };
+
+// ─── POST /api/papers/:id/report ─────────────────────────────────────────────
 
 exports.reportPaper = async (req, res) => {
   const { reason, comment } = req.body;
@@ -301,15 +333,17 @@ exports.reportPaper = async (req, res) => {
   }
 };
 
+// ─── DELETE /api/papers/:id ───────────────────────────────────────────────────
+
 exports.deletePaper = async (req, res) => {
   const paper = await Paper.findById(req.params.id);
   if (!paper) return res.status(404).json({ message: "Not found" });
-  await cloudinary.uploader.destroy(paper.cloudinaryId, {
-    resource_type: "raw",
-  });
+  await cloudinary.uploader.destroy(paper.cloudinaryId, { resource_type: "raw" });
   await paper.deleteOne();
   res.json({ message: "Deleted" });
 };
+
+// ─── PATCH /api/papers/:id/download ──────────────────────────────────────────
 
 exports.incrementDownload = async (req, res) => {
   const paper = await Paper.findByIdAndUpdate(
@@ -320,12 +354,22 @@ exports.incrementDownload = async (req, res) => {
   res.json({ downloads: paper.downloads });
 };
 
+// ─── GET /api/papers/trending ─────────────────────────────────────────────────
+
 exports.getTrending = async (req, res) => {
-  const papers = await Paper.find({ status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } })
+  const papers = await Paper.find({
+    status: { $in: ["approved", "flagged"] },
+    branchPending: false,
+    subjectPending: false,
+    courseCodePending: false,
+  })
     .sort({ downloads: -1 })
     .limit(10);
   res.json(papers);
 };
+
+// ─── GET /api/papers/pending (admin) ─────────────────────────────────────────
+// Legacy — papers with status 'flagged'. Kept for backward compatibility.
 
 exports.getPendingPapers = async (req, res) => {
   const papers = await Paper.find({ status: "flagged" }).populate(
@@ -334,6 +378,8 @@ exports.getPendingPapers = async (req, res) => {
   );
   res.json(papers);
 };
+
+// ─── PATCH /api/papers/:id/approve (admin) ───────────────────────────────────
 
 exports.approvePaper = async (req, res) => {
   const paper = await Paper.findByIdAndUpdate(
@@ -346,32 +392,65 @@ exports.approvePaper = async (req, res) => {
   res.json(paper);
 };
 
+// ─── GET /api/papers/stats (admin) ───────────────────────────────────────────
+
 exports.getStats = async (req, res) => {
   const Report = require("../models/Report");
-  const [total, pendingReports, pendingBranchCount, downloads] = await Promise.all([
-    Paper.countDocuments({ status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } }),
-    Report.countDocuments({ status: "pending" }),
-    Paper.countDocuments({ branchPending: true }),
-    Paper.aggregate([{ $group: { _id: null, total: { $sum: "$downloads" } } }]),
-  ]);
+  const [total, pendingReports, pendingBranchCount, pendingSubjectCount, pendingCourseCodeCount, downloads] =
+    await Promise.all([
+      Paper.countDocuments({
+        status: { $in: ["approved", "flagged"] },
+        branchPending: false,
+        subjectPending: false,
+        courseCodePending: false,
+      }),
+      Report.countDocuments({ status: "pending" }),
+      Paper.countDocuments({ branchPending: true }),
+      Paper.countDocuments({ subjectPending: true }),
+      Paper.countDocuments({ courseCodePending: true }),
+      Paper.aggregate([{ $group: { _id: null, total: { $sum: "$downloads" } } }]),
+    ]);
+
   const topSubjects = await Paper.aggregate([
-    { $match: { status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } } },
+    {
+      $match: {
+        status: { $in: ["approved", "flagged"] },
+        branchPending: false,
+        subjectPending: false,
+        courseCodePending: false,
+      },
+    },
     { $group: { _id: "$subject", downloads: { $sum: "$downloads" } } },
     { $sort: { downloads: -1 } },
     { $limit: 5 },
   ]);
+
+  const pendingReviewCount = pendingBranchCount + pendingSubjectCount + pendingCourseCodeCount;
+
   res.json({
     total,
     pending: pendingReports,
     pendingBranchCount,
+    pendingSubjectCount,
+    pendingCourseCodeCount,
+    pendingReviewCount,
     totalDownloads: downloads[0]?.total || 0,
     topSubjects,
   });
 };
 
+// ─── GET /api/papers/branch-stats (admin) ────────────────────────────────────
+
 exports.getBranchStats = async (req, res) => {
   const stats = await Paper.aggregate([
-    { $match: { status: { $in: ["approved", "flagged"] }, branchPending: { $ne: true } } },
+    {
+      $match: {
+        status: { $in: ["approved", "flagged"] },
+        branchPending: false,
+        subjectPending: false,
+        courseCodePending: false,
+      },
+    },
     {
       $group: {
         _id: "$branch",
