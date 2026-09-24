@@ -66,6 +66,15 @@ export default function Upload() {
   // ── Load Course Titles when branch changes ────────────────────────────────────
   const resolvedBranch = branchIsNew ? null : branchValue;
   useEffect(() => {
+    if (branchIsNew) {
+      setCourseTitleIsNew(true);
+      setCourseTitleValue(NOT_LISTED);
+      setCourseCodeIsNew(true);
+      setCourseCodeValue(NOT_LISTED);
+      setCourseTitles([]);
+      return;
+    }
+
     // Reset downstream fields
     setCourseTitleValue("");
     setCourseTitleId(null);
@@ -83,7 +92,7 @@ export default function Upload() {
     api.get(`/course-titles?branch=${resolvedBranch}`).then((r) => {
       setCourseTitles(Array.isArray(r.data) ? r.data : []);
     }).catch(() => setCourseTitles([]));
-  }, [resolvedBranch]);
+  }, [resolvedBranch, branchIsNew]);
 
   // ── Load Course Codes when Course Title changes ───────────────────────────────
   useEffect(() => {
@@ -142,10 +151,20 @@ export default function Upload() {
     if (val === NOT_LISTED) {
       setBranchIsNew(true);
       setBranchValue(NOT_LISTED);
+      setCourseTitleIsNew(true);
+      setCourseTitleValue(NOT_LISTED);
+      setCourseCodeIsNew(true);
+      setCourseCodeValue(NOT_LISTED);
     } else {
       setBranchIsNew(false);
       setBranchValue(val);
       setPendingBranchName("");
+      setCourseTitleIsNew(false);
+      setCourseTitleValue("");
+      setPendingCourseTitleName("");
+      setCourseCodeIsNew(false);
+      setCourseCodeValue("");
+      setPendingCourseCodeName("");
     }
   };
 
@@ -346,31 +365,33 @@ export default function Upload() {
         </div>
 
         {/* ── Course Title (cascades from Branch) ── */}
-        <div>
-          <label className={label}>
-            Course Title <span className="text-red-500">*</span>
-          </label>
-          <select
-            id="course-title-select"
-            className={inp}
-            value={courseTitleValue}
-            onChange={handleCourseTitleChange}
-            disabled={!branchResolved}
-            required={!courseTitleIsNew}
-          >
-            <option value="">{branchResolved ? "Select course title…" : "Select branch first"}</option>
-            {courseTitles.map((c) => (
-              <option key={c._id} value={c.name}>{c.name}</option>
-            ))}
-            <option value={NOT_LISTED}>Not listed / add new</option>
-          </select>
-        </div>
+        {!branchIsNew && (
+          <div>
+            <label className={label}>
+              Course Title <span className="text-red-500">*</span>
+            </label>
+            <select
+              id="course-title-select"
+              className={inp}
+              value={courseTitleValue}
+              onChange={handleCourseTitleChange}
+              disabled={!branchResolved}
+              required={!courseTitleIsNew}
+            >
+              <option value="">{branchResolved ? "Select course title…" : "Select branch first"}</option>
+              {courseTitles.map((c) => (
+                <option key={c._id} value={c.name}>{c.name}</option>
+              ))}
+              <option value={NOT_LISTED}>Not listed / add new</option>
+            </select>
+          </div>
+        )}
 
         {/* ── Paired New Course Title + New Course Code inputs ── */}
         {courseTitleIsNew ? (
           <div className="p-4 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-4">
             <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-              📌 Add New Course (Submitted together for Admin Review)
+              📌 {branchIsNew ? "Add Course Details for New Branch" : "Add New Course"} (Submitted together for Admin Review)
             </div>
             <div>
               <label className="block text-xs font-medium text-amber-700 dark:text-amber-300 mb-1.5">
