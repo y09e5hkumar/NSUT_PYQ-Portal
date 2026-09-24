@@ -9,10 +9,10 @@ const CourseCodeSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
-    // Linked to a Subject document
-    subject: {
+    // Linked to a CourseTitle document
+    courseTitle: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Subject",
+      ref: "CourseTitle",
       required: true,
     },
     isActive: { type: Boolean, default: true },
@@ -20,6 +20,6 @@ const CourseCodeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-CourseCodeSchema.index({ subject: 1, isActive: 1 });
+CourseCodeSchema.index({ courseTitle: 1, isActive: 1 });
 
 module.exports = mongoose.model("CourseCode", CourseCodeSchema);

@@ -1,4 +1,4 @@
-const Subject = require("../models/Subject");
+const CourseTitle = require("../models/CourseTitle");
 const CourseCode = require("../models/CourseCode");
 const Paper = require("../models/Paper");
 
@@ -6,13 +6,13 @@ function escapeRegex(text) {
   return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
 }
 
-// ─── Subject ──────────────────────────────────────────────────────────────────
+// ─── CourseTitle ──────────────────────────────────────────────────────────────
 
 /**
- * Returns all active subjects for a given branch, sorted alphabetically.
+ * Returns all active course titles for a given branch, sorted alphabetically.
  */
-async function getSubjectsForBranch(branch) {
-  return Subject.find({
+async function getCourseTitlesForBranch(branch) {
+  return CourseTitle.find({
     isActive: true,
     branch: branch.trim().toUpperCase(),
   })
@@ -21,13 +21,12 @@ async function getSubjectsForBranch(branch) {
 }
 
 /**
- * Checks whether a subject name already exists (case-insensitive) for a branch.
- * Used as a race-condition guard before creating a new pending entry.
- * Returns the matched Subject doc, or null if genuinely new.
+ * Checks whether a course title already exists (case-insensitive) for a branch.
+ * Returns matched CourseTitle doc, or null if genuinely new.
  */
-async function resolveSubject(rawName, branch) {
+async function resolveCourseTitle(rawName, branch) {
   if (!rawName || !branch) return null;
-  return Subject.findOne({
+  return CourseTitle.findOne({
     isActive: true,
     branch: branch.trim().toUpperCase(),
     name: new RegExp(`^${escapeRegex(rawName.trim())}$`, "i"),
@@ -35,15 +34,13 @@ async function resolveSubject(rawName, branch) {
 }
 
 /**
- * Admin: Add a new canonical subject.
- * Returns the created/upserted Subject doc.
- * Throws if subject already exists under that branch (case-insensitive).
+ * Admin: Add a new canonical course title.
  */
-async function addSubject({ name, branch, semester }) {
-  const existing = await resolveSubject(name, branch);
-  if (existing) return existing; // idempotent
+async function addCourseTitle({ name, branch, semester }) {
+  const existing = await resolveCourseTitle(name, branch);
+  if (existing) return existing;
 
-  return Subject.create({
+  return CourseTitle.create({
     name: name.trim(),
     branch: branch.trim().toUpperCase(),
     ...(semester ? { semester: Number(semester) } : {}),
@@ -52,32 +49,30 @@ async function addSubject({ name, branch, semester }) {
 }
 
 /**
- * Admin: Batch-resolve all papers whose pendingSubjectName matches rawName
- * under this branch, setting them to the canonical subject name and flipping
- * subjectPending to false.
+ * Admin: Batch-resolve all papers whose pendingCourseTitleName matches rawName
+ * under this branch, setting courseTitle and flipping courseTitlePending to false.
  */
-async function resolvePendingSubjects({ pendingName, branch, canonicalName }) {
+async function resolvePendingCourseTitles({ pendingName, branch, canonicalName }) {
   if (!pendingName || !branch || !canonicalName) {
     throw new Error("pendingName, branch, and canonicalName are required.");
   }
 
-  // Ensure canonical subject exists
-  let canonical = await resolveSubject(canonicalName, branch);
+  let canonical = await resolveCourseTitle(canonicalName, branch);
   if (!canonical) {
-    canonical = await addSubject({ name: canonicalName, branch });
+    canonical = await addCourseTitle({ name: canonicalName, branch });
   }
 
   const result = await Paper.updateMany(
     {
-      subjectPending: true,
+      courseTitlePending: true,
       branch: branch.trim().toUpperCase(),
-      pendingSubjectName: new RegExp(`^${escapeRegex(pendingName.trim())}$`, "i"),
+      pendingCourseTitleName: new RegExp(`^${escapeRegex(pendingName.trim())}$`, "i"),
     },
     {
       $set: {
-        subject: canonical.name,
-        subjectPending: false,
-        pendingSubjectName: null,
+        courseTitle: canonical.name,
+        courseTitlePending: false,
+        pendingCourseTitleName: null,
       },
     }
   );
@@ -88,64 +83,59 @@ async function resolvePendingSubjects({ pendingName, branch, canonicalName }) {
 // ─── CourseCode ───────────────────────────────────────────────────────────────
 
 /**
- * Returns all active course codes for a given subject ID, sorted alphabetically.
+ * Returns all active course codes for a given courseTitleId, sorted alphabetically.
  */
-async function getCourseCodesForSubject(subjectId) {
+async function getCourseCodesForCourseTitle(courseTitleId) {
   return CourseCode.find({
     isActive: true,
-    subject: subjectId,
+    courseTitle: courseTitleId,
   })
     .sort({ code: 1 })
     .select("code _id");
 }
 
 /**
- * Checks whether a course code already exists (exact uppercase match) for a subject.
- * Returns the matched CourseCode doc, or null if genuinely new.
+ * Checks whether a course code already exists for a course title.
  */
-async function resolveCourseCode(rawCode, subjectId) {
-  if (!rawCode || !subjectId) return null;
+async function resolveCourseCode(rawCode, courseTitleId) {
+  if (!rawCode || !courseTitleId) return null;
   return CourseCode.findOne({
     isActive: true,
-    subject: subjectId,
+    courseTitle: courseTitleId,
     code: rawCode.trim().toUpperCase(),
   });
 }
 
 /**
- * Admin: Add a new canonical course code for a subject.
- * Returns the created CourseCode doc (idempotent on existing).
+ * Admin: Add a new canonical course code for a course title.
  */
-async function addCourseCode({ code, subjectId }) {
-  const existing = await resolveCourseCode(code, subjectId);
+async function addCourseCode({ code, courseTitleId }) {
+  const existing = await resolveCourseCode(code, courseTitleId);
   if (existing) return existing;
 
   return CourseCode.create({
     code: code.trim().toUpperCase(),
-    subject: subjectId,
+    courseTitle: courseTitleId,
     isActive: true,
   });
 }
 
 /**
- * Admin: Batch-resolve all papers whose pendingCourseCodeName matches rawCode
- * under this branch+subject, flipping courseCodePending to false.
+ * Admin: Batch-resolve code-only pending papers under a known courseTitle.
  */
-async function resolvePendingCourseCodes({ pendingCode, branch, subjectName, canonicalCode }) {
+async function resolvePendingCourseCodes({ pendingCode, branch, courseTitle, canonicalCode }) {
   if (!pendingCode || !branch || !canonicalCode) {
     throw new Error("pendingCode, branch, and canonicalCode are required.");
   }
 
-  // Find the subject to get subjectId for CourseCode
-  const subjectDoc = subjectName
-    ? await resolveSubject(subjectName, branch)
+  const titleDoc = courseTitle
+    ? await resolveCourseTitle(courseTitle, branch)
     : null;
 
-  // Ensure canonical course code exists (attach to subject if known)
-  if (subjectDoc) {
-    const existing = await resolveCourseCode(canonicalCode, subjectDoc._id);
+  if (titleDoc) {
+    const existing = await resolveCourseCode(canonicalCode, titleDoc._id);
     if (!existing) {
-      await addCourseCode({ code: canonicalCode, subjectId: subjectDoc._id });
+      await addCourseCode({ code: canonicalCode, courseTitleId: titleDoc._id });
     }
   }
 
@@ -167,24 +157,134 @@ async function resolvePendingCourseCodes({ pendingCode, branch, subjectName, can
   return { resolvedCount: result.modifiedCount, canonicalCode: canonicalCode.trim().toUpperCase() };
 }
 
-// ─── Pending-review aggregation ───────────────────────────────────────────────
+// ─── Paired Pending Resolution ───────────────────────────────────────────────
 
 /**
- * Returns all pending subjects grouped by (pendingSubjectName, branch).
+ * Admin: Resolve paired pending CourseTitle + CourseCode entries together.
+ * Supports actions:
+ *   a) "approve_pair" / "approve_new": create both CourseTitle and CourseCode
+ *   b) "map_title_new_code": map to existing CourseTitle, create new CourseCode
+ *   c) "map_both": map to existing CourseTitle and existing CourseCode
+ *   d) "reject": set status to "flagged" or remove pending flags
  */
-async function getPendingSubjects() {
-  const papers = await Paper.find({ subjectPending: true })
+async function resolvePendingPair({
+  pendingTitle,
+  pendingCode,
+  branch,
+  action,
+  canonicalTitle,
+  canonicalCode,
+  existingTitleId,
+  existingCode,
+}) {
+  if (!pendingTitle || !branch) {
+    throw new Error("pendingTitle and branch are required.");
+  }
+
+  const uppercaseBranch = branch.trim().toUpperCase();
+  let finalTitleName = canonicalTitle ? canonicalTitle.trim() : pendingTitle.trim();
+  let finalCode = canonicalCode ? canonicalCode.trim().toUpperCase() : (pendingCode ? pendingCode.trim().toUpperCase() : "");
+
+  if (action === "reject") {
+    const result = await Paper.updateMany(
+      {
+        courseTitlePending: true,
+        branch: uppercaseBranch,
+        pendingCourseTitleName: new RegExp(`^${escapeRegex(pendingTitle.trim())}$`, "i"),
+      },
+      {
+        $set: {
+          status: "flagged",
+          courseTitlePending: false,
+          courseCodePending: false,
+        },
+      }
+    );
+    return { resolvedCount: result.modifiedCount, action: "rejected" };
+  }
+
+  let titleDoc = null;
+  let codeDoc = null;
+
+  if (action === "map_both") {
+    if (existingTitleId) {
+      titleDoc = await CourseTitle.findById(existingTitleId);
+      if (titleDoc) finalTitleName = titleDoc.name;
+    }
+    if (existingCode) {
+      finalCode = existingCode.trim().toUpperCase();
+    }
+  } else if (action === "map_title_new_code") {
+    if (existingTitleId) {
+      titleDoc = await CourseTitle.findById(existingTitleId);
+      if (titleDoc) finalTitleName = titleDoc.name;
+    } else {
+      titleDoc = await resolveCourseTitle(finalTitleName, uppercaseBranch);
+    }
+    if (!titleDoc) {
+      titleDoc = await addCourseTitle({ name: finalTitleName, branch: uppercaseBranch });
+    }
+    codeDoc = await addCourseCode({ code: finalCode, courseTitleId: titleDoc._id });
+  } else {
+    // "approve_pair" / "approve_new"
+    titleDoc = await resolveCourseTitle(finalTitleName, uppercaseBranch);
+    if (!titleDoc) {
+      titleDoc = await addCourseTitle({ name: finalTitleName, branch: uppercaseBranch });
+    }
+    if (finalCode) {
+      codeDoc = await addCourseCode({ code: finalCode, courseTitleId: titleDoc._id });
+    }
+  }
+
+  const query = {
+    courseTitlePending: true,
+    branch: uppercaseBranch,
+    pendingCourseTitleName: new RegExp(`^${escapeRegex(pendingTitle.trim())}$`, "i"),
+  };
+
+  const updateFields = {
+    courseTitle: finalTitleName,
+    courseTitlePending: false,
+    pendingCourseTitleName: null,
+    courseCodePending: false,
+    pendingCourseCodeName: null,
+  };
+  if (finalCode) {
+    updateFields.courseCode = finalCode;
+  }
+
+  const result = await Paper.updateMany(query, { $set: updateFields });
+
+  return {
+    resolvedCount: result.modifiedCount,
+    canonicalTitle: finalTitleName,
+    canonicalCode: finalCode,
+  };
+}
+
+// ─── Pending-review aggregations ──────────────────────────────────────────────
+
+/**
+ * Returns all pending course titles grouped by (pendingCourseTitleName, pendingCourseCodeName, branch).
+ */
+async function getPendingCourseTitles() {
+  const papers = await Paper.find({ courseTitlePending: true })
     .sort({ createdAt: -1 })
     .populate("uploadedBy", "name email")
-    .select("pendingSubjectName branch semester uploadedBy createdAt title");
+    .select("pendingCourseTitleName pendingCourseCodeName courseTitle courseCode branch semester uploadedBy createdAt");
 
   const grouped = {};
   for (const paper of papers) {
-    const key = `${paper.branch}||${paper.pendingSubjectName || "Unknown"}`;
+    const titleKey = paper.pendingCourseTitleName || paper.courseTitle || "Unknown Title";
+    const codeKey = paper.pendingCourseCodeName || paper.courseCode || "Unknown Code";
+    const key = `${paper.branch}||${titleKey}||${codeKey}`;
+
     if (!grouped[key]) {
       grouped[key] = {
-        pendingName: paper.pendingSubjectName || "Unknown",
+        pendingTitle: titleKey,
+        pendingCode: codeKey,
         branch: paper.branch,
+        semester: paper.semester,
         papers: [],
       };
     }
@@ -195,22 +295,22 @@ async function getPendingSubjects() {
 }
 
 /**
- * Returns all pending course codes grouped by (pendingCourseCodeName, branch).
+ * Returns all pending course codes (code-only pending, where course title was existing).
  */
 async function getPendingCourseCodes() {
-  const papers = await Paper.find({ courseCodePending: true })
+  const papers = await Paper.find({ courseCodePending: true, courseTitlePending: false })
     .sort({ createdAt: -1 })
     .populate("uploadedBy", "name email")
-    .select("pendingCourseCodeName branch subject uploadedBy createdAt title");
+    .select("pendingCourseCodeName branch courseTitle uploadedBy createdAt");
 
   const grouped = {};
   for (const paper of papers) {
-    const key = `${paper.branch}||${paper.subject}||${paper.pendingCourseCodeName || "Unknown"}`;
+    const key = `${paper.branch}||${paper.courseTitle}||${paper.pendingCourseCodeName || "Unknown"}`;
     if (!grouped[key]) {
       grouped[key] = {
         pendingCode: paper.pendingCourseCodeName || "Unknown",
         branch: paper.branch,
-        subject: paper.subject,
+        courseTitle: paper.courseTitle,
         papers: [],
       };
     }
@@ -222,14 +322,15 @@ async function getPendingCourseCodes() {
 
 module.exports = {
   escapeRegex,
-  getSubjectsForBranch,
-  resolveSubject,
-  addSubject,
-  resolvePendingSubjects,
-  getCourseCodesForSubject,
+  getCourseTitlesForBranch,
+  resolveCourseTitle,
+  addCourseTitle,
+  resolvePendingCourseTitles,
+  getCourseCodesForCourseTitle,
   resolveCourseCode,
   addCourseCode,
   resolvePendingCourseCodes,
-  getPendingSubjects,
+  resolvePendingPair,
+  getPendingCourseTitles,
   getPendingCourseCodes,
 };

@@ -88,10 +88,10 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        {/* Top subjects chart */}
+        {/* Top course titles chart */}
         <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-5">
           <h2 className="font-medium mb-4 text-sm">
-            Top subjects by downloads
+            Top course titles by downloads
           </h2>
           {stats.topSubjects.length === 0 ? (
             <div className="text-center py-8 text-gray-400 text-sm">

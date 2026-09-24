@@ -10,11 +10,11 @@ const {
   updateBranchApi,
   getPendingBranchesApi,
   resolvePendingBranchApi,
-  // Subject
-  createSubjectApi,
-  getSubjectsApi,
-  getPendingSubjectsApi,
-  resolvePendingSubjectApi,
+  // CourseTitle
+  createCourseTitleApi,
+  getCourseTitlesApi,
+  getPendingCourseTitlesApi,
+  resolvePendingCourseTitlePairApi,
   // CourseCode
   createCourseCodeApi,
   getPendingCourseCodesApi,
@@ -38,11 +38,19 @@ router.patch("/branches/:code", protect, adminOnly, updateBranchApi);
 router.get("/branches/pending", protect, adminOnly, getPendingBranchesApi);
 router.post("/branches/resolve-pending", protect, adminOnly, resolvePendingBranchApi);
 
-// ── Subject Taxonomy ───────────────────────────────────────────────────────────
-router.post("/subjects", protect, adminOnly, createSubjectApi);
-router.get("/subjects", protect, adminOnly, getSubjectsApi);
-router.get("/subjects/pending", protect, adminOnly, getPendingSubjectsApi);
-router.post("/subjects/resolve-pending", protect, adminOnly, resolvePendingSubjectApi);
+// ── CourseTitle Taxonomy ───────────────────────────────────────────────────────
+router.post("/course-titles", protect, adminOnly, createCourseTitleApi);
+router.get("/course-titles", protect, adminOnly, getCourseTitlesApi);
+router.get("/course-titles/pending", protect, adminOnly, getPendingCourseTitlesApi);
+router.patch("/course-titles/approve-pair", protect, adminOnly, resolvePendingCourseTitlePairApi);
+router.post("/course-titles/resolve-pending-pair", protect, adminOnly, resolvePendingCourseTitlePairApi);
+router.post("/course-titles/resolve-pending", protect, adminOnly, resolvePendingCourseTitlePairApi);
+
+// Aliases for /subjects backward compatibility
+router.post("/subjects", protect, adminOnly, createCourseTitleApi);
+router.get("/subjects", protect, adminOnly, getCourseTitlesApi);
+router.get("/subjects/pending", protect, adminOnly, getPendingCourseTitlesApi);
+router.post("/subjects/resolve-pending", protect, adminOnly, resolvePendingCourseTitlePairApi);
 
 // ── CourseCode Taxonomy ────────────────────────────────────────────────────────
 router.post("/course-codes", protect, adminOnly, createCourseCodeApi);

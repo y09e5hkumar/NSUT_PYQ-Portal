@@ -153,10 +153,10 @@ export default function ReportsQueue() {
                 {paper ? (
                   <div className="mb-3 p-3 bg-gray-50 dark:bg-gray-950 rounded-xl text-xs space-y-1">
                     <div className="font-semibold text-sm text-gray-900 dark:text-gray-100">
-                      {paper.title}
+                      {paper.courseTitle ? `${paper.courseTitle} — ${paper.examType} ${paper.year}` : paper.title}
                     </div>
                     <div className="text-gray-500">
-                      Branch: <strong>{paper.branch || paper.pendingBranchName}</strong> · Sem {paper.semester} · Subject: {paper.subject} · Year: {paper.year} · Exam: {paper.examType}
+                      Branch: <strong>{paper.branch || paper.pendingBranchName}</strong> · Sem {paper.semester} · Course Title: {paper.courseTitle || paper.subject} · Code: {paper.courseCode || "N/A"}
                     </div>
                   </div>
                 ) : (
@@ -221,11 +221,11 @@ export default function ReportsQueue() {
 
             <form onSubmit={submitMetadataCorrection} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Title</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Course Title</label>
                 <input
                   className="w-full border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-sm bg-white dark:bg-gray-900"
-                  value={editForm.title}
-                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                  value={editForm.courseTitle || editForm.subject || editForm.title}
+                  onChange={(e) => setEditForm({ ...editForm, courseTitle: e.target.value })}
                   required
                 />
               </div>

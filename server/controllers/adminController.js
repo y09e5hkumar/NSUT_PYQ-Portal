@@ -1,6 +1,6 @@
 const Report = require("../models/Report");
 const Paper = require("../models/Paper");
-const Subject = require("../models/Subject");
+const CourseTitle = require("../models/CourseTitle");
 const CourseCode = require("../models/CourseCode");
 const Branch = require("../models/Branch");
 const { resolveReport } = require("../services/reportService");
@@ -8,14 +8,14 @@ const {
   addBranch,
   addAlias,
   resolvePendingBranches,
-  getAllActiveBranches,
 } = require("../services/branchService");
 const {
-  addSubject,
-  resolvePendingSubjects,
+  addCourseTitle,
+  resolvePendingCourseTitles,
   addCourseCode,
   resolvePendingCourseCodes,
-  getPendingSubjects,
+  resolvePendingPair,
+  getPendingCourseTitles,
   getPendingCourseCodes,
 } = require("../services/taxonomyService");
 
@@ -172,61 +172,78 @@ exports.resolvePendingBranchApi = async (req, res) => {
   }
 };
 
-// ─── Subject Taxonomy Management ─────────────────────────────────────────────
+// ─── CourseTitle Taxonomy Management ─────────────────────────────────────────
 
-exports.getPendingSubjectsApi = async (req, res) => {
+exports.getPendingCourseTitlesApi = async (req, res) => {
   try {
-    const result = await getPendingSubjects();
+    const result = await getPendingCourseTitles();
     res.json(result);
   } catch (err) {
-    res.status(500).json({ message: "Failed to fetch pending subjects." });
+    res.status(500).json({ message: "Failed to fetch pending course titles." });
   }
 };
 
-exports.resolvePendingSubjectApi = async (req, res) => {
-  const { pendingName, branch, action, canonicalName } = req.body;
+/**
+ * Paired Approval Route (Section 4a, 4b, 4c, 4d)
+ */
+exports.resolvePendingCourseTitlePairApi = async (req, res) => {
+  const {
+    pendingTitle,
+    pendingCode,
+    branch,
+    action,
+    canonicalTitle,
+    canonicalCode,
+    existingTitleId,
+    existingCode,
+  } = req.body;
 
-  if (!pendingName || !branch || !action || !["create_new", "map_existing"].includes(action)) {
-    return res.status(400).json({ message: "pendingName, branch, and action are required." });
-  }
-  if (!canonicalName) {
-    return res.status(400).json({ message: "canonicalName is required." });
+  if (!pendingTitle || !branch || !action) {
+    return res.status(400).json({ message: "pendingTitle, branch, and action are required." });
   }
 
   try {
-    const result = await resolvePendingSubjects({ pendingName, branch, canonicalName });
+    const result = await resolvePendingPair({
+      pendingTitle,
+      pendingCode,
+      branch,
+      action,
+      canonicalTitle,
+      canonicalCode,
+      existingTitleId,
+      existingCode,
+    });
 
-    // Check for newly-created metadata collisions (if subject resolved creates a dedup conflict)
     res.json({
-      message: `Resolved ${result.resolvedCount} paper(s) to subject "${result.canonicalName}"`,
+      message: `Resolved ${result.resolvedCount} paper(s).`,
       result,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message || "Failed to resolve pending subject." });
+    res.status(500).json({ message: err.message || "Failed to resolve pending course title pair." });
   }
 };
 
-exports.createSubjectApi = async (req, res) => {
+exports.createCourseTitleApi = async (req, res) => {
   const { name, branch, semester } = req.body;
   if (!name || !branch) {
     return res.status(400).json({ message: "name and branch are required." });
   }
 
   try {
-    const subject = await addSubject({ name, branch, semester });
-    res.status(201).json({ message: "Subject created", subject });
+    const courseTitle = await addCourseTitle({ name, branch, semester });
+    res.status(201).json({ message: "Course title created", courseTitle });
   } catch (err) {
-    res.status(500).json({ message: err.message || "Failed to create subject." });
+    res.status(500).json({ message: err.message || "Failed to create course title." });
   }
 };
 
-exports.getSubjectsApi = async (req, res) => {
+exports.getCourseTitlesApi = async (req, res) => {
   const { branch } = req.query;
   const filter = { isActive: true };
   if (branch) filter.branch = branch.toUpperCase();
 
-  const subjects = await Subject.find(filter).sort({ branch: 1, name: 1 });
-  res.json(subjects);
+  const courseTitles = await CourseTitle.find(filter).sort({ branch: 1, name: 1 });
+  res.json(courseTitles);
 };
 
 // ─── CourseCode Taxonomy Management ──────────────────────────────────────────
@@ -241,7 +258,7 @@ exports.getPendingCourseCodesApi = async (req, res) => {
 };
 
 exports.resolvePendingCourseCodeApi = async (req, res) => {
-  const { pendingCode, branch, subjectName, action, canonicalCode } = req.body;
+  const { pendingCode, branch, courseTitle, action, canonicalCode } = req.body;
 
   if (!pendingCode || !branch || !action || !["create_new", "map_existing"].includes(action)) {
     return res.status(400).json({ message: "pendingCode, branch, and action are required." });
@@ -254,7 +271,7 @@ exports.resolvePendingCourseCodeApi = async (req, res) => {
     const result = await resolvePendingCourseCodes({
       pendingCode,
       branch,
-      subjectName,
+      courseTitle,
       canonicalCode,
     });
     res.json({
@@ -267,13 +284,13 @@ exports.resolvePendingCourseCodeApi = async (req, res) => {
 };
 
 exports.createCourseCodeApi = async (req, res) => {
-  const { code, subjectId } = req.body;
-  if (!code || !subjectId) {
-    return res.status(400).json({ message: "code and subjectId are required." });
+  const { code, courseTitleId } = req.body;
+  if (!code || !courseTitleId) {
+    return res.status(400).json({ message: "code and courseTitleId are required." });
   }
 
   try {
-    const cc = await addCourseCode({ code, subjectId });
+    const cc = await addCourseCode({ code, courseTitleId });
     res.status(201).json({ message: "Course code created", courseCode: cc });
   } catch (err) {
     res.status(500).json({ message: err.message || "Failed to create course code." });
@@ -284,7 +301,7 @@ exports.createCourseCodeApi = async (req, res) => {
 
 exports.getPendingReviewApi = async (req, res) => {
   try {
-    const [branches, subjects, courseCodes] = await Promise.all([
+    const [branches, courseTitles, courseCodes] = await Promise.all([
       (async () => {
         const papers = await Paper.find({ branchPending: true })
           .sort({ createdAt: -1 })
@@ -301,11 +318,11 @@ exports.getPendingReviewApi = async (req, res) => {
           papers,
         }));
       })(),
-      getPendingSubjects(),
+      getPendingCourseTitles(),
       getPendingCourseCodes(),
     ]);
 
-    res.json({ branches, subjects, courseCodes });
+    res.json({ branches, courseTitles, subjects: courseTitles, courseCodes });
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch pending review queue." });
   }

@@ -1,9 +1,9 @@
 const router = require("express").Router();
-const { getSubjectsForBranch } = require("../services/taxonomyService");
+const { getCourseTitlesForBranch } = require("../services/taxonomyService");
 
 /**
- * GET /api/subjects?branch=CSE
- * Public — returns all active subjects for the selected branch.
+ * GET /api/course-titles?branch=CSE
+ * Public — returns all active course titles for the selected branch.
  * Used by Upload.jsx for cascading dropdown.
  */
 router.get("/", async (req, res) => {
@@ -11,8 +11,8 @@ router.get("/", async (req, res) => {
   if (!branch) {
     return res.status(400).json({ message: "branch query param is required." });
   }
-  const subjects = await getSubjectsForBranch(branch);
-  res.json(subjects);
+  const courseTitles = await getCourseTitlesForBranch(branch);
+  res.json(courseTitles);
 });
 
 module.exports = router;

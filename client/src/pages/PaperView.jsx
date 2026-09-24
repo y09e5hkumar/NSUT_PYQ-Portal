@@ -31,13 +31,20 @@ export default function PaperView() {
   useEffect(() => {
     api.get(`/papers/${id}`).then(r => {
       setPaper(r.data);
+      const titleToQuery = r.data.courseTitle || r.data.subject;
       api.get('/papers', {
-        params: { subject: r.data.subject, branch: r.data.branch }
+        params: { courseTitle: titleToQuery, branch: r.data.branch }
       }).then(res =>
         setRelated(res.data.papers.filter(p => p._id !== id).slice(0, 4))
       );
     });
   }, [id]);
+
+  const displayTitle = paper
+    ? paper.courseTitle
+      ? `${paper.courseTitle} — ${paper.examType} ${paper.year}`
+      : paper.title || "Untitled Paper"
+    : "";
 
   const handleDownload = async () => {
     if (!user) {
@@ -48,7 +55,7 @@ export default function PaperView() {
     await api.patch(`/papers/${id}/download`);
     const link = document.createElement('a');
     link.href = paper.pdfUrl;
-    link.setAttribute('download', `${paper.title}.pdf`);
+    link.setAttribute('download', `${displayTitle}.pdf`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -95,7 +102,7 @@ export default function PaperView() {
         <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <h1 className="text-xl font-semibold">{paper.title}</h1>
+              <h1 className="text-xl font-semibold">{displayTitle}</h1>
               {paper.status === 'flagged' && (
                 <span className="text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 px-2.5 py-0.5 rounded-full font-medium">
                   ⚠️ Flagged for review
@@ -103,7 +110,7 @@ export default function PaperView() {
               )}
             </div>
             <div className="flex flex-wrap gap-2">
-              {[paper.branch, `Sem ${paper.semester}`, paper.subject, paper.year, paper.examType, paper.courseCode, paper.degree].filter(Boolean).map(tag => (
+              {[paper.branch, `Sem ${paper.semester}`, paper.courseTitle || paper.subject, paper.year, paper.examType, paper.courseCode, paper.degree].filter(Boolean).map(tag => (
                 <span key={tag} className="text-xs px-2.5 py-1 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400">
                   {tag}
                 </span>
@@ -215,18 +222,21 @@ export default function PaperView() {
         <div>
           <h2 className="font-medium mb-3">Related papers</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {related.map(p => (
-              <Link
-                key={p._id}
-                to={`/paper/${p._id}`}
-                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-3 hover:border-gray-400 transition-colors text-sm"
-              >
-                <div className="font-medium mb-1">{p.title}</div>
-                <div className="text-gray-400 text-xs">
-                  {p.examType} · {p.year} · ↓ {p.downloads}
-                </div>
-              </Link>
-            ))}
+            {related.map(p => {
+              const rTitle = p.courseTitle ? `${p.courseTitle} — ${p.examType} ${p.year}` : (p.title || "Paper");
+              return (
+                <Link
+                  key={p._id}
+                  to={`/paper/${p._id}`}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-3 hover:border-gray-400 transition-colors text-sm"
+                >
+                  <div className="font-medium mb-1">{rTitle}</div>
+                  <div className="text-gray-400 text-xs">
+                    {p.examType} · {p.year} · ↓ {p.downloads}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}
@@ -245,7 +255,7 @@ export default function PaperView() {
               </button>
             </div>
             <p className="text-xs text-gray-500">
-              Reporting paper: <strong>{paper.title}</strong>
+              Reporting paper: <strong>{displayTitle}</strong>
             </p>
 
             <form onSubmit={handleReportSubmit} className="space-y-4">

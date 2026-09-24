@@ -24,7 +24,7 @@ export default function Upload() {
 
   // ── Taxonomy data ─────────────────────────────────────────────────────────────
   const [branches, setBranches] = useState([]);
-  const [subjects, setSubjects] = useState([]);
+  const [courseTitles, setCourseTitles] = useState([]);
   const [courseCodes, setCourseCodes] = useState([]);
 
   // ── Form state ───────────────────────────────────────────────────────────────
@@ -38,24 +38,23 @@ export default function Upload() {
   // Semester
   const [semester, setSemester] = useState("");
 
-  // Subject
-  const [subjectValue, setSubjectValue] = useState("");  // dropdown value (name | NOT_LISTED | "")
-  const [subjectId, setSubjectId] = useState(null);      // _id of chosen existing subject
-  const [subjectIsNew, setSubjectIsNew] = useState(false);
-  const [pendingSubjectName, setPendingSubjectName] = useState("");
+  // Course Title
+  const [courseTitleValue, setCourseTitleValue] = useState(""); // dropdown value (name | NOT_LISTED | "")
+  const [courseTitleId, setCourseTitleId] = useState(null);     // _id of chosen existing course title
+  const [courseTitleIsNew, setCourseTitleIsNew] = useState(false);
+  const [pendingCourseTitleName, setPendingCourseTitleName] = useState("");
 
-  // Course code
+  // Course Code
   const [courseCodeValue, setCourseCodeValue] = useState(""); // dropdown value (code | NOT_LISTED | "")
   const [courseCodeIsNew, setCourseCodeIsNew] = useState(false);
   const [pendingCourseCodeName, setPendingCourseCodeName] = useState("");
 
-  // Exam / year / title
+  // Exam / Year
   const [examType, setExamType] = useState("");
   const [year, setYear] = useState("");
-  const [title, setTitle] = useState("");
 
   // ── Duplicate pre-check ───────────────────────────────────────────────────────
-  const [duplicateWarning, setDuplicateWarning] = useState(null); // null | paper doc
+  const [duplicateWarning, setDuplicateWarning] = useState(null);
 
   // ── Load branches ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -64,56 +63,54 @@ export default function Upload() {
     }).catch(() => {});
   }, []);
 
-  // ── Load subjects when branch changes ─────────────────────────────────────────
+  // ── Load Course Titles when branch changes ────────────────────────────────────
   const resolvedBranch = branchIsNew ? null : branchValue;
   useEffect(() => {
-    // Reset downstream
-    setSubjectValue("");
-    setSubjectId(null);
-    setSubjectIsNew(false);
-    setPendingSubjectName("");
+    // Reset downstream fields
+    setCourseTitleValue("");
+    setCourseTitleId(null);
+    setCourseTitleIsNew(false);
+    setPendingCourseTitleName("");
     setCourseCodes([]);
     setCourseCodeValue("");
     setCourseCodeIsNew(false);
     setPendingCourseCodeName("");
 
     if (!resolvedBranch) {
-      setSubjects([]);
+      setCourseTitles([]);
       return;
     }
-    api.get(`/subjects?branch=${resolvedBranch}`).then((r) => {
-      setSubjects(Array.isArray(r.data) ? r.data : []);
-    }).catch(() => setSubjects([]));
+    api.get(`/course-titles?branch=${resolvedBranch}`).then((r) => {
+      setCourseTitles(Array.isArray(r.data) ? r.data : []);
+    }).catch(() => setCourseTitles([]));
   }, [resolvedBranch]);
 
-  // ── Load course codes when subject changes ────────────────────────────────────
+  // ── Load Course Codes when Course Title changes ───────────────────────────────
   useEffect(() => {
-    // Reset downstream
     setCourseCodeValue("");
     setCourseCodeIsNew(false);
     setPendingCourseCodeName("");
 
-    if (!subjectId || subjectIsNew) {
+    if (!courseTitleId || courseTitleIsNew) {
       setCourseCodes([]);
       return;
     }
-    api.get(`/course-codes?subjectId=${subjectId}`).then((r) => {
+    api.get(`/course-codes?courseTitleId=${courseTitleId}`).then((r) => {
       setCourseCodes(Array.isArray(r.data) ? r.data : []);
     }).catch(() => setCourseCodes([]));
-  }, [subjectId, subjectIsNew]);
+  }, [courseTitleId, courseTitleIsNew]);
 
-  // ── Duplicate pre-check (fires when all canonical fields are filled) ──────────
+  // ── Duplicate pre-check ───────────────────────────────────────────────────────
   useEffect(() => {
     const branch = resolvedBranch;
-    const subject = subjectIsNew ? pendingSubjectName : (subjectValue !== NOT_LISTED ? subjectValue : "");
-    const courseCode = courseCodeIsNew ? pendingCourseCodeName : (courseCodeValue !== NOT_LISTED ? courseCodeValue : "");
+    const currentTitle = courseTitleIsNew ? pendingCourseTitleName : (courseTitleValue !== NOT_LISTED ? courseTitleValue : "");
+    const currentCode = (courseTitleIsNew || courseCodeIsNew) ? pendingCourseCodeName : (courseCodeValue !== NOT_LISTED ? courseCodeValue : "");
 
-    if (!branch || !semester || !subject || !examType || !year) {
+    if (!branch || !semester || !currentTitle || !examType || !year) {
       setDuplicateWarning(null);
       return;
     }
-    // Only run pre-check when no field is pending
-    if (branchIsNew || subjectIsNew || courseCodeIsNew) {
+    if (branchIsNew || courseTitleIsNew || courseCodeIsNew) {
       setDuplicateWarning(null);
       return;
     }
@@ -123,8 +120,8 @@ export default function Upload() {
         const { data } = await api.post("/papers/check-duplicate", {
           branch,
           semester,
-          subject,
-          courseCode,
+          courseTitle: currentTitle,
+          courseCode: currentCode,
           examType,
           year,
         });
@@ -136,7 +133,7 @@ export default function Upload() {
 
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedBranch, semester, subjectValue, pendingSubjectName, subjectIsNew, courseCodeValue, pendingCourseCodeName, courseCodeIsNew, examType, year]);
+  }, [resolvedBranch, semester, courseTitleValue, pendingCourseTitleName, courseTitleIsNew, courseCodeValue, pendingCourseCodeName, courseCodeIsNew, examType, year]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -152,19 +149,24 @@ export default function Upload() {
     }
   };
 
-  const handleSubjectChange = (e) => {
+  const handleCourseTitleChange = (e) => {
     const val = e.target.value;
     if (val === NOT_LISTED) {
-      setSubjectIsNew(true);
-      setSubjectValue(NOT_LISTED);
-      setSubjectId(null);
+      setCourseTitleIsNew(true);
+      setCourseTitleValue(NOT_LISTED);
+      setCourseTitleId(null);
+      // When Course Title is not listed, course code is ALSO required to be entered manually
+      setCourseCodeIsNew(true);
+      setCourseCodeValue(NOT_LISTED);
     } else {
-      setSubjectIsNew(false);
-      setSubjectValue(val);
-      // Find the matching subject _id for the course-code lookup
-      const found = subjects.find((s) => s.name === val);
-      setSubjectId(found?._id || null);
-      setPendingSubjectName("");
+      setCourseTitleIsNew(false);
+      setCourseTitleValue(val);
+      const found = courseTitles.find((c) => c.name === val);
+      setCourseTitleId(found?._id || null);
+      setPendingCourseTitleName("");
+      setCourseCodeIsNew(false);
+      setCourseCodeValue("");
+      setPendingCourseCodeName("");
     }
   };
 
@@ -183,9 +185,8 @@ export default function Upload() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // ── Client-side validation ─────────────────────────────────────────────────
+    // Validation
     if (!file) return toast.error("Please attach a PDF file.");
-    if (!title.trim()) return toast.error("Paper title is required.");
     if (!semester) return toast.error("Semester is required.");
     if (!examType) return toast.error("Exam type is required.");
     if (!year) return toast.error("Year is required.");
@@ -193,15 +194,19 @@ export default function Upload() {
     if (!branchIsNew && !branchValue) return toast.error("Branch is required.");
     if (branchIsNew && !pendingBranchName.trim()) return toast.error("Please specify your unlisted branch name.");
 
-    const subjectText = subjectIsNew ? pendingSubjectName : subjectValue;
-    if (!subjectText || subjectText === NOT_LISTED) return toast.error("Subject is required.");
-    if (subjectIsNew && !pendingSubjectName.trim()) return toast.error("Please specify your unlisted subject name.");
+    if (courseTitleIsNew) {
+      if (!pendingCourseTitleName.trim()) return toast.error("New course title is required.");
+      if (!pendingCourseCodeName.trim()) return toast.error("New course code is required when adding a new title.");
+    } else {
+      if (!courseTitleValue || courseTitleValue === NOT_LISTED) return toast.error("Course title is required.");
+      if (courseCodeIsNew && !pendingCourseCodeName.trim()) return toast.error("Please specify the new course code.");
+      if (!courseCodeIsNew && !courseCodeValue) return toast.error("Course code is required.");
+    }
 
     setLoading(true);
     try {
       const fd = new FormData();
       fd.append("pdf", file);
-      fd.append("title", title.trim());
       fd.append("degree", degree);
       fd.append("semester", semester);
       fd.append("examType", examType);
@@ -215,22 +220,20 @@ export default function Upload() {
         fd.append("branch", branchValue);
       }
 
-      // Subject
-      fd.append("subjectIsNew", String(subjectIsNew));
-      if (subjectIsNew) {
-        fd.append("pendingSubjectName", pendingSubjectName.trim());
+      // Course Title & Course Code
+      fd.append("courseTitleIsNew", String(courseTitleIsNew));
+      if (courseTitleIsNew) {
+        fd.append("pendingCourseTitleName", pendingCourseTitleName.trim());
+        fd.append("courseCodeIsNew", "true");
+        fd.append("pendingCourseCodeName", pendingCourseCodeName.trim().toUpperCase());
       } else {
-        fd.append("subject", subjectValue);
-      }
-
-      // Course code (optional)
-      fd.append("courseCodeIsNew", String(courseCodeIsNew));
-      if (courseCodeIsNew) {
-        if (pendingCourseCodeName.trim()) {
-          fd.append("pendingCourseCodeName", pendingCourseCodeName.trim());
+        fd.append("courseTitle", courseTitleValue);
+        fd.append("courseCodeIsNew", String(courseCodeIsNew));
+        if (courseCodeIsNew) {
+          fd.append("pendingCourseCodeName", pendingCourseCodeName.trim().toUpperCase());
+        } else {
+          fd.append("courseCode", courseCodeValue);
         }
-      } else if (courseCodeValue && courseCodeValue !== NOT_LISTED) {
-        fd.append("courseCode", courseCodeValue);
       }
 
       await api.post("/papers", fd, {
@@ -263,10 +266,7 @@ export default function Upload() {
     }
   };
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
   const branchResolved = !branchIsNew && !!branchValue;
-  const subjectResolved = (!subjectIsNew && subjectValue && subjectValue !== NOT_LISTED) ||
-    (subjectIsNew && pendingSubjectName.trim());
 
   return (
     <div className="max-w-xl mx-auto">
@@ -282,9 +282,9 @@ export default function Upload() {
           <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-800 dark:text-amber-200">
             <div className="font-semibold mb-1">⚠️ This paper may already exist</div>
             <p>
-              A paper matching this branch / semester / subject / exam type / year was found:{" "}
+              A paper matching this branch / semester / course title / exam type / year was found:{" "}
               <Link to={`/paper/${duplicateWarning._id}`} target="_blank" className="underline font-medium">
-                {duplicateWarning.title || "View paper"} ({duplicateWarning.year}) ↗
+                {duplicateWarning.courseTitle} ({duplicateWarning.examType} {duplicateWarning.year}) ↗
               </Link>
             </p>
             <p className="mt-1 text-amber-700 dark:text-amber-300">
@@ -345,82 +345,102 @@ export default function Upload() {
           </select>
         </div>
 
-        {/* ── Subject (cascades from Branch) ── */}
+        {/* ── Course Title (cascades from Branch) ── */}
         <div>
           <label className={label}>
-            Subject <span className="text-red-500">*</span>
+            Course Title <span className="text-red-500">*</span>
           </label>
           <select
-            id="subject-select"
+            id="course-title-select"
             className={inp}
-            value={subjectValue}
-            onChange={handleSubjectChange}
+            value={courseTitleValue}
+            onChange={handleCourseTitleChange}
             disabled={!branchResolved}
-            required={!subjectIsNew}
+            required={!courseTitleIsNew}
           >
-            <option value="">{branchResolved ? "Select subject…" : "Select branch first"}</option>
-            {subjects.map((s) => (
-              <option key={s._id} value={s.name}>{s.name}</option>
+            <option value="">{branchResolved ? "Select course title…" : "Select branch first"}</option>
+            {courseTitles.map((c) => (
+              <option key={c._id} value={c.name}>{c.name}</option>
             ))}
             <option value={NOT_LISTED}>Not listed / add new</option>
           </select>
         </div>
 
-        {subjectIsNew && (
+        {/* ── Paired New Course Title + New Course Code inputs ── */}
+        {courseTitleIsNew ? (
+          <div className="p-4 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-4">
+            <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+              📌 Add New Course (Submitted together for Admin Review)
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-amber-700 dark:text-amber-300 mb-1.5">
+                New Course Title <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="pending-course-title-input"
+                className={inp}
+                placeholder="e.g. Software Quality Assurance"
+                value={pendingCourseTitleName}
+                onChange={(e) => setPendingCourseTitleName(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-amber-700 dark:text-amber-300 mb-1.5">
+                New Course Code <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="pending-course-code-input"
+                className={inp}
+                placeholder="e.g. CS-702"
+                value={pendingCourseCodeName}
+                onChange={(e) => setPendingCourseCodeName(e.target.value.toUpperCase())}
+                required
+              />
+            </div>
+          </div>
+        ) : (
+          /* ── Course Code (dropdown for existing course title) ── */
           <div>
-            <label className="block text-xs font-medium text-amber-600 dark:text-amber-400 mb-1.5">
-              Specify unlisted subject name <span className="text-red-500">*</span>{" "}
-              <span className="font-normal">(will be reviewed by admin)</span>
+            <label className={label}>
+              Course Code <span className="text-red-500">*</span>
             </label>
-            <input
-              id="pending-subject-input"
+            <select
+              id="course-code-select"
               className={inp}
-              placeholder="e.g. Advanced Algorithms"
-              value={pendingSubjectName}
-              onChange={(e) => setPendingSubjectName(e.target.value)}
-              required
-            />
+              value={courseCodeValue}
+              onChange={handleCourseCodeChange}
+              disabled={!courseTitleValue || courseTitleValue === NOT_LISTED}
+              required={!courseCodeIsNew}
+            >
+              <option value="">
+                {courseTitleValue && courseTitleValue !== NOT_LISTED
+                  ? "Select course code…"
+                  : "Select course title first"}
+              </option>
+              {courseCodes.map((c) => (
+                <option key={c._id} value={c.code}>{c.code}</option>
+              ))}
+              {courseTitleValue && courseTitleValue !== NOT_LISTED && (
+                <option value={NOT_LISTED}>Not listed / add new</option>
+              )}
+            </select>
           </div>
         )}
 
-        {/* ── Course Code (cascades from Subject) ── */}
-        <div>
-          <label className={label}>Course Code</label>
-          <select
-            id="course-code-select"
-            className={inp}
-            value={courseCodeValue}
-            onChange={handleCourseCodeChange}
-            disabled={!subjectResolved || subjectIsNew}
-          >
-            <option value="">
-              {subjectIsNew
-                ? "Not available (new subject)"
-                : subjectResolved
-                ? "Select course code… (optional)"
-                : "Select subject first"}
-            </option>
-            {courseCodes.map((c) => (
-              <option key={c._id} value={c.code}>{c.code}</option>
-            ))}
-            {subjectResolved && !subjectIsNew && (
-              <option value={NOT_LISTED}>Not listed / add new</option>
-            )}
-          </select>
-        </div>
-
-        {courseCodeIsNew && (
+        {courseCodeIsNew && !courseTitleIsNew && (
           <div>
             <label className="block text-xs font-medium text-amber-600 dark:text-amber-400 mb-1.5">
-              Specify unlisted course code{" "}
+              Specify unlisted course code <span className="text-red-500">*</span>{" "}
               <span className="font-normal">(will be reviewed by admin)</span>
             </label>
             <input
-              id="pending-course-code-input"
+              id="pending-course-code-standalone-input"
               className={inp}
               placeholder="e.g. CS-601"
               value={pendingCourseCodeName}
               onChange={(e) => setPendingCourseCodeName(e.target.value.toUpperCase())}
+              required
             />
           </div>
         )}
@@ -449,21 +469,6 @@ export default function Upload() {
               ))}
             </select>
           </div>
-        </div>
-
-        {/* ── Paper Title ── */}
-        <div>
-          <label className={label}>
-            Paper Title <span className="text-red-500">*</span>
-          </label>
-          <input
-            id="paper-title-input"
-            className={inp}
-            placeholder="e.g. DBMS End Sem 2024"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            required
-          />
         </div>
 
         {/* ── PDF File ── */}
@@ -501,10 +506,10 @@ export default function Upload() {
         </div>
 
         {/* ── Pending fields notice ── */}
-        {(branchIsNew || subjectIsNew || courseCodeIsNew) && (
+        {(branchIsNew || courseTitleIsNew || courseCodeIsNew) && (
           <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs text-indigo-700 dark:text-indigo-300">
             <span className="font-semibold">ℹ️ Note:</span> Your paper will publish immediately but{" "}
-            {[branchIsNew && "branch", subjectIsNew && "subject", courseCodeIsNew && "course code"]
+            {[branchIsNew && "branch", courseTitleIsNew && "course title + code", courseCodeIsNew && !courseTitleIsNew && "course code"]
               .filter(Boolean)
               .join(", ")}{" "}
             will be reviewed by an admin. The paper won't appear in filtered search results until resolved.

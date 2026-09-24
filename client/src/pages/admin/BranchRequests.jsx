@@ -119,10 +119,10 @@ export default function BranchRequests() {
                   >
                     <div>
                       <span className="font-medium text-gray-900 dark:text-gray-100 mr-2">
-                        {p.title}
+                        {p.courseTitle ? `${p.courseTitle} — ${p.examType} ${p.year}` : p.title}
                       </span>
                       <span className="text-gray-400">
-                        ({p.year} · Sem {p.semester} · {p.subject})
+                        ({p.year} · Sem {p.semester} · {p.courseTitle || p.subject})
                       </span>
                     </div>
                     <a

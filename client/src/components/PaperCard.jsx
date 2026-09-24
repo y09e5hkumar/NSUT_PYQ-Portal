@@ -3,31 +3,40 @@ import { Link } from "react-router-dom";
 const EXAM_COLORS = {
   "End Sem": "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300",
   "Mid Sem": "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
-  "Back Paper":
-    "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+  "Summer Sem": "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
+  "Back Paper": "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
   Quiz: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
 };
 
 export default function PaperCard({ paper }) {
+  const displayTitle = paper.courseTitle
+    ? `${paper.courseTitle} — ${paper.examType} ${paper.year}`
+    : paper.title || "Untitled Paper";
+
   return (
     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 hover:border-gray-400 dark:hover:border-gray-600 transition-colors">
       <div className="flex items-start justify-between gap-2 mb-3">
-        <h3 className="font-medium text-sm leading-snug">{paper.title}</h3>
+        <h3 className="font-medium text-sm leading-snug">{displayTitle}</h3>
         <span
           className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap font-medium ${
-            EXAM_COLORS[paper.examType]
+            EXAM_COLORS[paper.examType] || "bg-gray-100 text-gray-700"
           }`}
         >
           {paper.examType}
         </span>
       </div>
       <div className="flex flex-wrap gap-1.5 mb-3">
-        <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400">
+        <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400 font-medium">
           {paper.branch}
         </span>
         <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400">
           Sem {paper.semester}
         </span>
+        {paper.courseCode && (
+          <span className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 rounded-full font-mono">
+            {paper.courseCode}
+          </span>
+        )}
         <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded-full text-gray-600 dark:text-gray-400">
           {paper.year}
         </span>

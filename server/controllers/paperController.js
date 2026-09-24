@@ -3,7 +3,7 @@ const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
 const { checkDuplicate } = require("../services/dedupService");
 const { resolveBranch } = require("../services/branchService");
-const { resolveSubject, resolveCourseCode } = require("../services/taxonomyService");
+const { resolveCourseTitle, resolveCourseCode } = require("../services/taxonomyService");
 const { createReport } = require("../services/reportService");
 
 // ─── Cloudinary helper ────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ exports.getPapers = async (req, res) => {
   const {
     branch,
     semester,
-    subject,
+    courseTitle,
     year,
     examType,
     courseCode,
@@ -42,18 +42,17 @@ exports.getPapers = async (req, res) => {
     limit = 20,
   } = req.query;
 
-  // Exclude all papers with any unresolved pending flag from default results.
-  // This prevents half-resolved papers appearing with blank/unlisted field values.
+  // Exclude papers with any unresolved pending flag from public listing
   const filter = {
     status: { $in: ["approved", "flagged"] },
     branchPending: false,
-    subjectPending: false,
+    courseTitlePending: false,
     courseCodePending: false,
   };
 
   if (branch) filter.branch = branch.toUpperCase();
   if (semester) filter.semester = Number(semester);
-  if (subject) filter.subject = new RegExp(subject, "i");
+  if (courseTitle) filter.courseTitle = new RegExp(courseTitle, "i");
   if (year) filter.year = Number(year);
   if (examType) filter.examType = examType;
   if (courseCode) filter.courseCode = courseCode.toUpperCase();
@@ -70,16 +69,14 @@ exports.getPapers = async (req, res) => {
 };
 
 // ─── POST /api/papers/check-duplicate ────────────────────────────────────────
-// Non-blocking pre-check shown as a UX banner before final submit.
-// Server re-runs this on actual submit too — never trust the client check alone.
 
 exports.checkDuplicateApi = async (req, res) => {
-  const { branch, semester, subject, courseCode, examType, year } = req.body;
+  const { branch, semester, courseTitle, courseCode, examType, year } = req.body;
 
   const duplicate = await checkDuplicate({
     branch,
     semester,
-    subject,
+    courseTitle,
     courseCode,
     examType,
     year,
@@ -95,30 +92,26 @@ exports.checkDuplicateApi = async (req, res) => {
 
 exports.uploadPaper = async (req, res) => {
   const {
-    title,
     degree = "B.Tech",
     // Branch
     branch,
-    branchIsNew,            // "true" | "false" — did the student select "Not listed"?
+    branchIsNew,
     pendingBranchName,
     // Semester / Exam
     semester,
     examType,
     year,
-    // Subject
-    subject,
-    subjectIsNew,           // "true" | "false"
-    pendingSubjectName,
-    // Course code
+    // Course Title
+    courseTitle,
+    courseTitleIsNew,
+    pendingCourseTitleName,
+    // Course Code
     courseCode,
-    courseCodeIsNew,        // "true" | "false"
+    courseCodeIsNew,
     pendingCourseCodeName,
   } = req.body;
 
   // ── 1. Basic required-field validation ──────────────────────────────────────
-  if (!title || !title.trim()) {
-    return res.status(400).json({ message: "Paper title is required." });
-  }
   if (!semester) {
     return res.status(400).json({ message: "Semester is required." });
   }
@@ -130,8 +123,13 @@ exports.uploadPaper = async (req, res) => {
   }
 
   const parsedBranchIsNew = branchIsNew === "true" || branchIsNew === true;
-  const parsedSubjectIsNew = subjectIsNew === "true" || subjectIsNew === true;
-  const parsedCourseCodeIsNew = courseCodeIsNew === "true" || courseCodeIsNew === true;
+  const parsedCourseTitleIsNew = courseTitleIsNew === "true" || courseTitleIsNew === true;
+  let parsedCourseCodeIsNew = courseCodeIsNew === "true" || courseCodeIsNew === true;
+
+  // Key amendment rule: If Course Title is new, Course Code MUST also be provided as new paired entry
+  if (parsedCourseTitleIsNew) {
+    parsedCourseCodeIsNew = true;
+  }
 
   // ── 2. Resolve Branch ───────────────────────────────────────────────────────
   let finalBranch = null;
@@ -139,14 +137,11 @@ exports.uploadPaper = async (req, res) => {
   let finalPendingBranchName = null;
 
   if (parsedBranchIsNew) {
-    // Student typed a new branch name
     if (!pendingBranchName || !pendingBranchName.trim()) {
       return res.status(400).json({ message: "Please specify your unlisted branch name." });
     }
-    // Race-condition guard: check it doesn't already exist
     const existing = await resolveBranch(pendingBranchName.trim());
     if (existing.matched) {
-      // It matched an alias — use the canonical code instead
       finalBranch = existing.code;
       isBranchPending = false;
     } else {
@@ -162,60 +157,86 @@ exports.uploadPaper = async (req, res) => {
     isBranchPending = false;
   }
 
-  // ── 3. Resolve Subject ──────────────────────────────────────────────────────
-  let finalSubject = null;
-  let isSubjectPending = false;
-  let finalPendingSubjectName = null;
+  // ── 3 & 4. Resolve Course Title and Course Code ─────────────────────────────
+  let finalCourseTitle = null;
+  let isCourseTitlePending = false;
+  let finalPendingCourseTitleName = null;
 
-  const subjectInput = parsedSubjectIsNew ? (pendingSubjectName || "").trim() : (subject || "").trim();
-
-  if (!subjectInput) {
-    return res.status(400).json({ message: "Subject is required." });
-  }
-
-  if (parsedSubjectIsNew) {
-    // Race-condition guard: check it doesn't already exist under this branch
-    const branchForCheck = finalBranch || (finalPendingBranchName ? "PENDING" : null);
-    const existingSubject = branchForCheck && branchForCheck !== "PENDING"
-      ? await resolveSubject(subjectInput, branchForCheck)
-      : null;
-
-    if (existingSubject) {
-      // Snapped to existing canonical subject
-      finalSubject = existingSubject.name;
-      isSubjectPending = false;
-    } else {
-      finalSubject = subjectInput;
-      isSubjectPending = true;
-      finalPendingSubjectName = subjectInput;
-    }
-  } else {
-    finalSubject = subjectInput;
-    isSubjectPending = false;
-  }
-
-  // ── 4. Resolve CourseCode ───────────────────────────────────────────────────
   let finalCourseCode = null;
   let isCourseCodePending = false;
   let finalPendingCourseCodeName = null;
 
-  const codeInput = parsedCourseCodeIsNew
-    ? (pendingCourseCodeName || "").trim().toUpperCase()
-    : (courseCode || "").trim().toUpperCase();
+  if (parsedCourseTitleIsNew) {
+    // Paired entry: Both new title AND new code must be provided
+    const titleInput = (pendingCourseTitleName || "").trim();
+    const codeInput = (pendingCourseCodeName || "").trim().toUpperCase();
 
-  if (codeInput) {
+    if (!titleInput) {
+      return res.status(400).json({ message: "New course title is required." });
+    }
+    if (!codeInput) {
+      return res.status(400).json({ message: "New course code is required." });
+    }
+
+    // Check if title already exists under this branch (race-condition guard)
+    const branchForCheck = finalBranch || "PENDING";
+    const existingTitle = branchForCheck !== "PENDING"
+      ? await resolveCourseTitle(titleInput, branchForCheck)
+      : null;
+
+    if (existingTitle) {
+      finalCourseTitle = existingTitle.name;
+      isCourseTitlePending = false;
+
+      // Title existed! Now check code under existing title
+      const existingCode = await resolveCourseCode(codeInput, existingTitle._id);
+      if (existingCode) {
+        finalCourseCode = existingCode.code;
+        isCourseCodePending = false;
+      } else {
+        finalCourseCode = codeInput;
+        isCourseCodePending = true;
+        finalPendingCourseCodeName = codeInput;
+      }
+    } else {
+      finalCourseTitle = titleInput;
+      isCourseTitlePending = true;
+      finalPendingCourseTitleName = titleInput;
+
+      finalCourseCode = codeInput;
+      isCourseCodePending = true;
+      finalPendingCourseCodeName = codeInput;
+    }
+  } else {
+    // Existing Course Title selected
+    const titleInput = (courseTitle || "").trim();
+    if (!titleInput) {
+      return res.status(400).json({ message: "Course title is required." });
+    }
+    finalCourseTitle = titleInput;
+    isCourseTitlePending = false;
+
+    // Course code check
+    const codeInput = parsedCourseCodeIsNew
+      ? (pendingCourseCodeName || "").trim().toUpperCase()
+      : (courseCode || "").trim().toUpperCase();
+
+    if (!codeInput) {
+      return res.status(400).json({ message: "Course code is required." });
+    }
+
     if (parsedCourseCodeIsNew) {
-      // Pending: subject itself may also be pending, skip canonical lookup in that case
-      if (!isSubjectPending && finalBranch) {
-        // Try to find subject doc
-        const SubjectModel = require("../models/Subject");
-        const subjectDoc = await SubjectModel.findOne({
-          name: new RegExp(`^${finalSubject}$`, "i"),
+      // Find course title doc to check race condition
+      if (finalBranch) {
+        const CourseTitleModel = require("../models/CourseTitle");
+        const titleDoc = await CourseTitleModel.findOne({
+          name: new RegExp(`^${finalCourseTitle}$`, "i"),
           branch: finalBranch,
           isActive: true,
         });
-        const existingCode = subjectDoc
-          ? await resolveCourseCode(codeInput, subjectDoc._id)
+
+        const existingCode = titleDoc
+          ? await resolveCourseCode(codeInput, titleDoc._id)
           : null;
 
         if (existingCode) {
@@ -227,7 +248,6 @@ exports.uploadPaper = async (req, res) => {
           finalPendingCourseCodeName = codeInput;
         }
       } else {
-        // Subject is also pending — just flag course code as pending too
         finalCourseCode = codeInput;
         isCourseCodePending = true;
         finalPendingCourseCodeName = codeInput;
@@ -239,12 +259,11 @@ exports.uploadPaper = async (req, res) => {
   }
 
   // ── 5. Server-side duplicate re-check ───────────────────────────────────────
-  // Only applicable when all three fields are canonical (not pending)
-  if (!isBranchPending && !isSubjectPending && !isCourseCodePending) {
+  if (!isBranchPending && !isCourseTitlePending && !isCourseCodePending) {
     const duplicate = await checkDuplicate({
       branch: finalBranch,
       semester,
-      subject: finalSubject,
+      courseTitle: finalCourseTitle,
       courseCode: finalCourseCode,
       examType,
       year,
@@ -275,15 +294,14 @@ exports.uploadPaper = async (req, res) => {
   // ── 8. Create Paper document ────────────────────────────────────────────────
   try {
     const paper = await Paper.create({
-      title: title.trim(),
       degree,
       branch: finalBranch,
       branchPending: isBranchPending,
       pendingBranchName: finalPendingBranchName,
       semester: Number(semester),
-      subject: finalSubject,
-      subjectPending: isSubjectPending,
-      pendingSubjectName: finalPendingSubjectName,
+      courseTitle: finalCourseTitle,
+      courseTitlePending: isCourseTitlePending,
+      pendingCourseTitleName: finalPendingCourseTitleName,
       courseCode: finalCourseCode,
       courseCodePending: isCourseCodePending,
       pendingCourseCodeName: finalPendingCourseCodeName,
@@ -292,12 +310,11 @@ exports.uploadPaper = async (req, res) => {
       pdfUrl: cloudinaryResult.secure_url,
       cloudinaryId: cloudinaryResult.public_id,
       uploadedBy: req.user._id,
-      status: "approved", // Publish immediately; pending flags handle admin queue
+      status: "approved",
     });
 
     res.status(201).json(paper);
   } catch (err) {
-    // Metadata uniqueness constraint violation (race condition on concurrent submits)
     if (err.code === 11000) {
       await cloudinary.uploader.destroy(cloudinaryResult.public_id, {
         resource_type: "raw",
@@ -360,7 +377,7 @@ exports.getTrending = async (req, res) => {
   const papers = await Paper.find({
     status: { $in: ["approved", "flagged"] },
     branchPending: false,
-    subjectPending: false,
+    courseTitlePending: false,
     courseCodePending: false,
   })
     .sort({ downloads: -1 })
@@ -368,8 +385,7 @@ exports.getTrending = async (req, res) => {
   res.json(papers);
 };
 
-// ─── GET /api/papers/pending (admin) ─────────────────────────────────────────
-// Legacy — papers with status 'flagged'. Kept for backward compatibility.
+// ─── GET /api/papers/pending (admin legacy) ───────────────────────────────────
 
 exports.getPendingPapers = async (req, res) => {
   const papers = await Paper.find({ status: "flagged" }).populate(
@@ -396,46 +412,48 @@ exports.approvePaper = async (req, res) => {
 
 exports.getStats = async (req, res) => {
   const Report = require("../models/Report");
-  const [total, pendingReports, pendingBranchCount, pendingSubjectCount, pendingCourseCodeCount, downloads] =
+  const [total, pendingReports, pendingBranchCount, pendingCourseTitleCount, pendingCourseCodeCount, downloads] =
     await Promise.all([
       Paper.countDocuments({
         status: { $in: ["approved", "flagged"] },
         branchPending: false,
-        subjectPending: false,
+        courseTitlePending: false,
         courseCodePending: false,
       }),
       Report.countDocuments({ status: "pending" }),
       Paper.countDocuments({ branchPending: true }),
-      Paper.countDocuments({ subjectPending: true }),
+      Paper.countDocuments({ courseTitlePending: true }),
       Paper.countDocuments({ courseCodePending: true }),
       Paper.aggregate([{ $group: { _id: null, total: { $sum: "$downloads" } } }]),
     ]);
 
-  const topSubjects = await Paper.aggregate([
+  const topCourseTitles = await Paper.aggregate([
     {
       $match: {
         status: { $in: ["approved", "flagged"] },
         branchPending: false,
-        subjectPending: false,
+        courseTitlePending: false,
         courseCodePending: false,
       },
     },
-    { $group: { _id: "$subject", downloads: { $sum: "$downloads" } } },
+    { $group: { _id: "$courseTitle", downloads: { $sum: "$downloads" } } },
     { $sort: { downloads: -1 } },
     { $limit: 5 },
   ]);
 
-  const pendingReviewCount = pendingBranchCount + pendingSubjectCount + pendingCourseCodeCount;
+  const pendingReviewCount = pendingBranchCount + pendingCourseTitleCount + pendingCourseCodeCount;
 
   res.json({
     total,
     pending: pendingReports,
     pendingBranchCount,
-    pendingSubjectCount,
+    pendingCourseTitleCount,
+    pendingSubjectCount: pendingCourseTitleCount, // backward compat key if needed
     pendingCourseCodeCount,
     pendingReviewCount,
     totalDownloads: downloads[0]?.total || 0,
-    topSubjects,
+    topSubjects: topCourseTitles, // backward compat key for admin dashboard chart
+    topCourseTitles,
   });
 };
 
@@ -447,7 +465,7 @@ exports.getBranchStats = async (req, res) => {
       $match: {
         status: { $in: ["approved", "flagged"] },
         branchPending: false,
-        subjectPending: false,
+        courseTitlePending: false,
         courseCodePending: false,
       },
     },

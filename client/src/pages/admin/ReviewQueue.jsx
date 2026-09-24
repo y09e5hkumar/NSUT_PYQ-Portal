@@ -31,45 +31,48 @@ export default function ReviewQueue() {
         </div>
       ) : (
         <div className="space-y-3">
-          {papers.map((p) => (
-            <div
-              key={p._id}
-              className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4"
-            >
-              <div>
-                <div className="font-medium text-sm mb-1">{p.title}</div>
-                <div className="text-xs text-gray-400">
-                  {p.branch} · Sem {p.semester} · {p.subject} · {p.year} ·{" "}
-                  {p.examType}
+          {papers.map((p) => {
+            const displayTitle = p.courseTitle ? `${p.courseTitle} — ${p.examType} ${p.year}` : p.title;
+            return (
+              <div
+                key={p._id}
+                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 flex items-center justify-between gap-4"
+              >
+                <div>
+                  <div className="font-medium text-sm mb-1">{displayTitle}</div>
+                  <div className="text-xs text-gray-400">
+                    {p.branch} · Sem {p.semester} · {p.courseTitle || p.subject} · {p.year} ·{" "}
+                    {p.examType}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    Uploaded by: {p.uploadedBy?.name} ({p.uploadedBy?.email})
+                  </div>
                 </div>
-                <div className="text-xs text-gray-400 mt-1">
-                  Uploaded by: {p.uploadedBy?.name} ({p.uploadedBy?.email})
+                <div className="flex gap-2 flex-shrink-0">
+                  <a
+                    href={p.pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
+                  >
+                    Preview
+                  </a>
+                  <button
+                    onClick={() => approve(p._id)}
+                    className="text-xs px-3 py-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 rounded-lg hover:opacity-80"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => reject(p._id)}
+                    className="text-xs px-3 py-1.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg hover:opacity-80"
+                  >
+                    Reject
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <a
-                  href={p.pdfUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  Preview
-                </a>
-                <button
-                  onClick={() => approve(p._id)}
-                  className="text-xs px-3 py-1.5 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 rounded-lg hover:opacity-80"
-                >
-                  Approve
-                </button>
-                <button
-                  onClick={() => reject(p._id)}
-                  className="text-xs px-3 py-1.5 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg hover:opacity-80"
-                >
-                  Reject
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

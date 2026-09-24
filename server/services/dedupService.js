@@ -2,32 +2,31 @@ const Paper = require("../models/Paper");
 
 /**
  * Metadata-based duplicate check.
- * A paper is considered a duplicate when all six canonical fields match
- * AND none of the three pending flags are set (i.e., all values are canonical).
+ * A paper is considered a duplicate when canonical fields match
+ * AND none of the pending flags are set.
  *
  * Returns the matching paper document, or null if no duplicate found.
  */
-async function checkDuplicate({ branch, semester, subject, courseCode, examType, year }) {
-  if (!branch || !semester || !subject || !examType || !year) return null;
+async function checkDuplicate({ branch, semester, courseTitle, courseCode, examType, year }) {
+  if (!branch || !semester || !courseTitle || !examType || !year) return null;
 
   const query = {
     branch: branch.toUpperCase(),
     semester: Number(semester),
-    subject,
+    courseTitle: courseTitle.trim(),
     examType,
     year: Number(year),
     branchPending: false,
-    subjectPending: false,
+    courseTitlePending: false,
     courseCodePending: false,
   };
 
-  // courseCode is optional in the form but if provided must match
   if (courseCode && courseCode.trim()) {
     query.courseCode = courseCode.trim().toUpperCase();
   }
 
   return Paper.findOne(query).select(
-    "title branch semester subject courseCode examType year status pdfUrl createdAt"
+    "branch semester courseTitle courseCode examType year status pdfUrl createdAt"
   );
 }
 

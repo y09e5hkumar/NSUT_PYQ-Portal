@@ -22,13 +22,16 @@ export default function FilterBar({ filters, onChange }) {
           setBranches(r.data);
         }
       })
-      .catch(() => {
-        // use fallback if API call fails
-      });
+      .catch(() => {});
   }, []);
 
   const sel = (field) => (e) =>
     onChange({ ...filters, [field]: e.target.value, page: 1 });
+
+  const handleCourseTitleChange = (e) => {
+    const val = e.target.value;
+    onChange({ ...filters, courseTitle: val, subject: val, page: 1 });
+  };
 
   const cls =
     "w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-400";
@@ -61,9 +64,9 @@ export default function FilterBar({ filters, onChange }) {
       </select>
       <input
         className={cls}
-        placeholder="Subject…"
-        value={filters.subject || ""}
-        onChange={sel("subject")}
+        placeholder="Course title…"
+        value={filters.courseTitle || filters.subject || ""}
+        onChange={handleCourseTitleChange}
       />
       <select className={cls} value={filters.year || ""} onChange={sel("year")}>
         <option value="">All years</option>

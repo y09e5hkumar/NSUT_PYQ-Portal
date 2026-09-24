@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 
 const TABS = [
   { key: "branches", label: "New Branches", icon: "🌿" },
-  { key: "subjects", label: "New Subjects", icon: "📚" },
+  { key: "courseTitles", label: "New Course Titles", icon: "📚" },
   { key: "courseCodes", label: "New Course Codes", icon: "🔖" },
 ];
 
@@ -23,7 +23,7 @@ function PaperList({ papers }) {
           className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400"
         >
           <span>📄</span>
-          <span className="truncate">{p.title}</span>
+          <span className="truncate">{p.courseTitle || p.pendingCourseTitleName || "Untitled"} — {p.examType || ""} {p.year || ""}</span>
           <span className="text-gray-400 shrink-0">by {p.uploadedBy?.name || "unknown"}</span>
         </a>
       ))}
@@ -36,6 +36,7 @@ function Badge({ children, variant = "amber" }) {
     amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
     indigo: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300",
     green: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
+    purple: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
   }[variant];
   return (
     <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${cls}`}>
@@ -48,7 +49,7 @@ function Badge({ children, variant = "amber" }) {
 
 function BranchTab({ items, onRefresh, branches }) {
   const [resolving, setResolving] = useState({});
-  const [selections, setSelections] = useState({}); // { [pendingName]: { action, targetCode, newCode, newFullName } }
+  const [selections, setSelections] = useState({});
 
   const getOrInit = (name) =>
     selections[name] || { action: "create_new", targetCode: "", newCode: "", newFullName: "" };
@@ -177,45 +178,53 @@ function BranchTab({ items, onRefresh, branches }) {
   );
 }
 
-// ─── Subject Pending Tab ───────────────────────────────────────────────────────
+// ─── CourseTitle Pending Tab (Paired Resolution) ───────────────────────────────
 
-function SubjectTab({ items, onRefresh, branches }) {
+function CourseTitleTab({ items, onRefresh }) {
   const [resolving, setResolving] = useState({});
   const [selections, setSelections] = useState({});
-  const [existingSubjects, setExistingSubjects] = useState({});
+  const [existingTitles, setExistingTitles] = useState({});
 
-  const keyOf = (item) => `${item.branch}||${item.pendingName}`;
+  const keyOf = (item) => `${item.branch}||${item.pendingTitle}||${item.pendingCode}`;
 
   const getOrInit = (key) =>
-    selections[key] || { action: "create_new", canonicalName: "", mapTarget: "" };
+    selections[key] || {
+      action: "approve_pair",
+      canonicalTitle: "",
+      canonicalCode: "",
+      existingTitleId: "",
+      existingCode: "",
+    };
 
   const update = (key, patch) =>
     setSelections((prev) => ({ ...prev, [key]: { ...getOrInit(key), ...patch } }));
 
-  const loadExistingSubjects = async (branch) => {
-    if (existingSubjects[branch]) return;
+  const loadExistingTitles = async (branch) => {
+    if (existingTitles[branch]) return;
     try {
-      const { data } = await api.get(`/subjects?branch=${branch}`);
-      setExistingSubjects((prev) => ({ ...prev, [branch]: data }));
+      const { data } = await api.get(`/course-titles?branch=${branch}`);
+      setExistingTitles((prev) => ({ ...prev, [branch]: data }));
     } catch {}
   };
 
   const handleResolve = async (item) => {
     const key = keyOf(item);
     const sel = getOrInit(key);
-    const canonical = sel.action === "map_existing" ? sel.mapTarget : (sel.canonicalName.trim() || item.pendingName);
-
-    if (!canonical) return toast.error("Provide or select a canonical subject name.");
 
     setResolving((r) => ({ ...r, [key]: true }));
     try {
-      await api.post("/admin/subjects/resolve-pending", {
-        pendingName: item.pendingName,
+      await api.patch("/admin/course-titles/approve-pair", {
+        pendingTitle: item.pendingTitle,
+        pendingCode: item.pendingCode,
         branch: item.branch,
         action: sel.action,
-        canonicalName: canonical,
+        canonicalTitle: sel.canonicalTitle || item.pendingTitle,
+        canonicalCode: sel.canonicalCode || item.pendingCode,
+        existingTitleId: sel.existingTitleId,
+        existingCode: sel.existingCode,
       });
-      toast.success(`Resolved "${item.pendingName}" → "${canonical}" ✅`);
+
+      toast.success(`Resolved title "${item.pendingTitle}" & code "${item.pendingCode}" ✅`);
       onRefresh();
     } catch (err) {
       toast.error(err.response?.data?.message || "Resolution failed.");
@@ -225,7 +234,7 @@ function SubjectTab({ items, onRefresh, branches }) {
   };
 
   if (!items.length) {
-    return <EmptyState label="No pending subject requests" />;
+    return <EmptyState label="No pending course title requests" />;
   }
 
   return (
@@ -233,67 +242,135 @@ function SubjectTab({ items, onRefresh, branches }) {
       {items.map((item) => {
         const key = keyOf(item);
         const sel = getOrInit(key);
-        const existing = existingSubjects[item.branch] || [];
+        const titlesForBranch = existingTitles[item.branch] || [];
 
         return (
           <div
             key={key}
             className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-5"
           >
-            <div className="flex items-center gap-3 mb-1">
-              <span className="font-semibold text-sm">"{item.pendingName}"</span>
-              <Badge variant="amber">{item.count} paper{item.count !== 1 ? "s" : ""}</Badge>
+            <div className="flex items-center gap-3 mb-1 flex-wrap">
+              <span className="font-semibold text-sm">"{item.pendingTitle}"</span>
+              <Badge variant="green">{item.pendingCode}</Badge>
               <Badge variant="indigo">{item.branch}</Badge>
+              <Badge variant="amber">{item.count} paper{item.count !== 1 ? "s" : ""}</Badge>
             </div>
 
             <PaperList papers={item.papers} />
 
             <div className="mt-4 space-y-3">
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap">
                 <button
-                  onClick={() => { update(key, { action: "create_new" }); }}
+                  onClick={() => update(key, { action: "approve_pair" })}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    sel.action === "create_new" ? "bg-indigo-600 text-white" : "border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    sel.action === "approve_pair"
+                      ? "bg-indigo-600 text-white"
+                      : "border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
                   }`}
                 >
-                  Approve as new
+                  Approve both as new pair
                 </button>
                 <button
-                  onClick={() => { update(key, { action: "map_existing" }); loadExistingSubjects(item.branch); }}
+                  onClick={() => {
+                    update(key, { action: "map_title_new_code" });
+                    loadExistingTitles(item.branch);
+                  }}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    sel.action === "map_existing" ? "bg-indigo-600 text-white" : "border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    sel.action === "map_title_new_code"
+                      ? "bg-indigo-600 text-white"
+                      : "border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
                   }`}
                 >
-                  Map to existing
+                  Map title to existing, code is new
+                </button>
+                <button
+                  onClick={() => {
+                    update(key, { action: "map_both" });
+                    loadExistingTitles(item.branch);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    sel.action === "map_both"
+                      ? "bg-indigo-600 text-white"
+                      : "border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  Map both to existing
+                </button>
+                <button
+                  onClick={() => update(key, { action: "reject" })}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    sel.action === "reject"
+                      ? "bg-red-600 text-white"
+                      : "border border-red-200 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20"
+                  }`}
+                >
+                  Reject
                 </button>
               </div>
 
-              {sel.action === "create_new" && (
-                <div>
-                  <input
-                    className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
-                    placeholder={`Canonical name (leave blank to use "${item.pendingName}")`}
-                    value={sel.canonicalName}
-                    onChange={(e) => update(key, { canonicalName: e.target.value })}
-                  />
-                  <p className="text-[10px] text-gray-400 mt-1">
-                    Existing subjects under {item.branch}:{" "}
-                    {existing.length ? existing.map((s) => s.name).join(", ") : "none yet"}
-                  </p>
+              {sel.action === "approve_pair" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">Canonical Title</label>
+                    <input
+                      className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
+                      placeholder={`Title (default: "${item.pendingTitle}")`}
+                      value={sel.canonicalTitle}
+                      onChange={(e) => update(key, { canonicalTitle: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-1">Canonical Code</label>
+                    <input
+                      className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950 font-mono"
+                      placeholder={`Code (default: "${item.pendingCode}")`}
+                      value={sel.canonicalCode}
+                      onChange={(e) => update(key, { canonicalCode: e.target.value.toUpperCase() })}
+                    />
+                  </div>
                 </div>
               )}
 
-              {sel.action === "map_existing" && (
-                <select
-                  className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
-                  value={sel.mapTarget}
-                  onChange={(e) => update(key, { mapTarget: e.target.value })}
-                >
-                  <option value="">Select existing subject…</option>
-                  {existing.map((s) => (
-                    <option key={s._id} value={s.name}>{s.name}</option>
-                  ))}
-                </select>
+              {sel.action === "map_title_new_code" && (
+                <div className="space-y-2">
+                  <select
+                    className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
+                    value={sel.existingTitleId}
+                    onChange={(e) => update(key, { existingTitleId: e.target.value })}
+                  >
+                    <option value="">Select existing course title under {item.branch}…</option>
+                    {titlesForBranch.map((t) => (
+                      <option key={t._id} value={t._id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950 font-mono"
+                    placeholder={`New Course Code for chosen title (default: "${item.pendingCode}")`}
+                    value={sel.canonicalCode}
+                    onChange={(e) => update(key, { canonicalCode: e.target.value.toUpperCase() })}
+                  />
+                </div>
+              )}
+
+              {sel.action === "map_both" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
+                    value={sel.existingTitleId}
+                    onChange={(e) => update(key, { existingTitleId: e.target.value })}
+                  >
+                    <option value="">Select existing course title…</option>
+                    {titlesForBranch.map((t) => (
+                      <option key={t._id} value={t._id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950 font-mono"
+                    placeholder="Existing course code"
+                    value={sel.existingCode}
+                    onChange={(e) => update(key, { existingCode: e.target.value.toUpperCase() })}
+                  />
+                </div>
               )}
 
               <button
@@ -311,13 +388,13 @@ function SubjectTab({ items, onRefresh, branches }) {
   );
 }
 
-// ─── CourseCode Pending Tab ────────────────────────────────────────────────────
+// ─── CourseCode Pending Tab (Code-only pending) ────────────────────────────────
 
 function CourseCodeTab({ items, onRefresh }) {
   const [resolving, setResolving] = useState({});
   const [selections, setSelections] = useState({});
 
-  const keyOf = (item) => `${item.branch}||${item.subject}||${item.pendingCode}`;
+  const keyOf = (item) => `${item.branch}||${item.courseTitle}||${item.pendingCode}`;
 
   const getOrInit = (key) =>
     selections[key] || { action: "create_new", canonicalCode: "", mapTarget: "" };
@@ -337,7 +414,7 @@ function CourseCodeTab({ items, onRefresh }) {
       await api.post("/admin/course-codes/resolve-pending", {
         pendingCode: item.pendingCode,
         branch: item.branch,
-        subjectName: item.subject,
+        courseTitle: item.courseTitle,
         action: sel.action,
         canonicalCode: canonical.toUpperCase(),
       });
@@ -369,7 +446,7 @@ function CourseCodeTab({ items, onRefresh }) {
               <span className="font-semibold text-sm font-mono">{item.pendingCode}</span>
               <Badge variant="amber">{item.count} paper{item.count !== 1 ? "s" : ""}</Badge>
               <Badge variant="indigo">{item.branch}</Badge>
-              <Badge variant="green">{item.subject}</Badge>
+              <Badge variant="green">{item.courseTitle}</Badge>
             </div>
 
             <PaperList papers={item.papers} />
@@ -396,7 +473,7 @@ function CourseCodeTab({ items, onRefresh }) {
 
               {sel.action === "create_new" && (
                 <input
-                  className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
+                  className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950 font-mono"
                   placeholder={`Canonical code (leave blank to use "${item.pendingCode}")`}
                   value={sel.canonicalCode}
                   onChange={(e) => update(key, { canonicalCode: e.target.value.toUpperCase() })}
@@ -405,7 +482,7 @@ function CourseCodeTab({ items, onRefresh }) {
 
               {sel.action === "map_existing" && (
                 <input
-                  className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950"
+                  className="w-full border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-xs bg-white dark:bg-gray-950 font-mono"
                   placeholder="Enter existing canonical course code"
                   value={sel.mapTarget}
                   onChange={(e) => update(key, { mapTarget: e.target.value.toUpperCase() })}
@@ -441,9 +518,9 @@ function EmptyState({ label }) {
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function PendingReview() {
-  const [data, setData] = useState({ branches: [], subjects: [], courseCodes: [] });
+  const [data, setData] = useState({ branches: [], courseTitles: [], courseCodes: [] });
   const [branches, setBranches] = useState([]);
-  const [activeTab, setActiveTab] = useState("branches");
+  const [activeTab, setActiveTab] = useState("courseTitles");
   const [loading, setLoading] = useState(true);
 
   const fetchData = async () => {
@@ -453,7 +530,12 @@ export default function PendingReview() {
         api.get("/admin/pending-review"),
         api.get("/branches"),
       ]);
-      setData(queueRes.data);
+      const resData = queueRes.data || {};
+      setData({
+        branches: resData.branches || [],
+        courseTitles: resData.courseTitles || resData.subjects || [],
+        courseCodes: resData.courseCodes || [],
+      });
       setBranches(Array.isArray(branchesRes.data) ? branchesRes.data : []);
     } catch {
       toast.error("Failed to load pending review queue.");
@@ -466,11 +548,11 @@ export default function PendingReview() {
 
   const counts = {
     branches: data.branches.length,
-    subjects: data.subjects.length,
+    courseTitles: data.courseTitles.length,
     courseCodes: data.courseCodes.length,
   };
 
-  const totalPending = counts.branches + counts.subjects + counts.courseCodes;
+  const totalPending = counts.branches + counts.courseTitles + counts.courseCodes;
 
   return (
     <div>
@@ -524,8 +606,8 @@ export default function PendingReview() {
           {activeTab === "branches" && (
             <BranchTab items={data.branches} onRefresh={fetchData} branches={branches} />
           )}
-          {activeTab === "subjects" && (
-            <SubjectTab items={data.subjects} onRefresh={fetchData} branches={branches} />
+          {activeTab === "courseTitles" && (
+            <CourseTitleTab items={data.courseTitles} onRefresh={fetchData} />
           )}
           {activeTab === "courseCodes" && (
             <CourseCodeTab items={data.courseCodes} onRefresh={fetchData} />

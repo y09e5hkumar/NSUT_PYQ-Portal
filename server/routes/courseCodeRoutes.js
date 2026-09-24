@@ -1,17 +1,17 @@
 const router = require("express").Router();
-const { getCourseCodesForSubject } = require("../services/taxonomyService");
+const { getCourseCodesForCourseTitle } = require("../services/taxonomyService");
 
 /**
- * GET /api/course-codes?subjectId=...
- * Public — returns all active course codes for the selected subject.
+ * GET /api/course-codes?courseTitleId=...
+ * Public — returns all active course codes for the selected course title.
  * Used by Upload.jsx for cascading dropdown.
  */
 router.get("/", async (req, res) => {
-  const { subjectId } = req.query;
-  if (!subjectId) {
-    return res.status(400).json({ message: "subjectId query param is required." });
+  const courseTitleId = req.query.courseTitleId || req.query.subjectId;
+  if (!courseTitleId) {
+    return res.status(400).json({ message: "courseTitleId query param is required." });
   }
-  const codes = await getCourseCodesForSubject(subjectId);
+  const codes = await getCourseCodesForCourseTitle(courseTitleId);
   res.json(codes);
 });
 
