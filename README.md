@@ -1,311 +1,290 @@
-# 📄 NSUT PYQ Portal
+# 📄 NSUT PYQ Hub (PYQ Portal)
 
-A full-stack Previous Year Question Paper management portal for NSUT students — find, preview, and download papers instantly without visiting the library or digging through messy Google Drive folders.
+A state-of-the-art, full-stack Previous Year Question Paper platform for Netaji Subhas University of Technology (NSUT) students — search, preview, upload, and download PYQs with a community-driven taxonomy and automated moderation pipeline.
 
-**Live Demo:** [nsut-pyq-portal.vercel.app](https://nsut-pyq-portal.vercel.app)  
-**Backend API:** [nsut-pyq-portal.onrender.com](https://nsut-pyq-portal.onrender.com)
+**Live Frontend:** [nsut-pyq-portal.vercel.app](https://nsut-pyq-portal.vercel.app)  
+**Live API Server:** [nsut-pyq-portal.onrender.com](https://nsut-pyq-portal.onrender.com)
 
 ---
-## 📸 Screenshots
 
-### Home Page
-![Home](screenshots/home.png)
+## 📸 Screenshots & Highlights
 
-### PDF Preview
-![Paper View](screenshots/paper-view.png)
+| Feature | Description |
+|---|---|
+| **Home & Explore** | Instant search with debounce, filters by Branch, Semester, Course Title, Exam Type, and Year |
+| **In-Browser PDF Preview** | Read PDF question papers inline with page navigation, zoom, and direct download tracking |
+| **Dynamic Taxonomy Upload** | Upload papers with auto-filling Course Title & Course Code cascades + escape hatch for unlisted courses |
+| **Admin Moderation Hub** | Multi-queue management for Pending Branch/Course entries, Reported papers, and Analytics |
 
-### Admin Dashboard
-![Dashboard](screenshots/dashboard.png)
+---
 
-## Features
+## 🔥 Key Features & Architecture Highlights
 
-### For Students
--  **Smart Search** — instant search by subject or paper title with debounce
--  **Advanced Filters** — filter by branch (18 branches), semester (1–8), subject, year, and exam type
-- **PDF Preview** — view papers in-browser before downloading using react-pdf
-- **Download Tracking** — download count tracked per paper
-- **Trending Papers** — see most downloaded papers at a glance
-- **Student Uploads** — submit your own PYQs for admin review
-- **Dark Mode** — persistent dark/light mode toggle
-- **Responsive** — works on mobile and desktop
+### 🎓 For Students
+- 🔍 **Instant Smart Search**: Search papers by course title, course code, or uploader name with debounced inputs.
+- 🗂️ **Hierarchical Taxonomy Cascades**: Selecting a Branch populates relevant Course Titles; selecting a title auto-fills its official Course Code.
+- ➕ **Paired "Not Listed" Escape Hatch**: If a course title or branch is missing, students can submit the new Course Title & Course Code pair together in one simple step. The paper publishes immediately while queuing taxonomy items for admin review.
+- 📑 **In-Browser PDF Reader**: Native PDF preview powered by `react-pdf` without downloading files locally first.
+- 📊 **Download Counter**: Real-time download metrics tracked per paper.
+- 🚩 **Community Reporting**: Report inaccurate metadata, poor PDF scans, wrong year/exam, or duplicates directly to admins.
+- 🌓 **Persistent Dark Mode**: Seamless dark/light theme toggle.
 
-### For Admins
-- **Analytics Dashboard** — bar charts for top subjects and branch-wise paper distribution
-- **Subject Leaderboard** — ranked list of most downloaded subjects
-- **Review Queue** — approve or reject student-submitted papers
-- **Paper Management** — upload, edit metadata, and delete papers
-- **Email Notifications** — automatic email sent to student on paper approval
+### 🛡️ For Admins
+- 📊 **Analytics & Leaderboard**: Recharts visualizations for top-downloaded subjects and branch distribution.
+- 📋 **Unified Pending Review Queue (`/admin/pending-review`)**: Moderates unlisted branch requests and paired course title/code submissions. Approving promotes them to master taxonomy for all users.
+- 🚩 **Community Reports Queue (`/admin/reports`)**: Resolve student flags with resolution notes or paper deletion.
+- 🌿 **Branch & Taxonomy Control (`/admin/branches`)**: Create official branches, update alias mappings, and manage course titles.
 
-### Auth & Security
-- **JWT Authentication** — secure token-based auth with 7-day expiry
-- **Email Verification** — verify account via email link before login
-- **Google OAuth** — one-click sign in with Google
-- **Role-Based Access** — student and admin roles with protected routes
-- **Secret Admin Code** — register as admin using a secret code
+### 🔐 Authentication & Security
+- 🔑 **Dual Auth System**: JWT token-based email/password authentication + one-click **Google OAuth 2.0**.
+- ✉️ **Fail-Safe Email Verification**: Nodemailer SMTP integration with SSL (Port 465) and automatic auto-verification fallback if email services are unreachable.
+- 🛡️ **Role-Based Access Control**: Student vs Admin guard middleware (`protect`, `adminOnly`).
+- 🤫 **Secret Admin Registration**: Secure admin onboarding via secret passkey.
 
 ---
 
 ## 🛠️ Tech Stack
 
-### Frontend
-| Technology | Purpose |
-|------------|---------|
-| React + Vite | UI framework |
-| Tailwind CSS | Styling |
-| React Router v6 | Client-side routing |
-| Axios | API calls |
-| react-pdf | In-browser PDF viewer |
-| Recharts | Analytics charts |
-| react-hot-toast | Notifications |
+### Frontend (`/client`)
+- **Core**: React 18 + Vite
+- **Styling**: Tailwind CSS (Dark mode support)
+- **Routing**: React Router v6
+- **HTTP Client**: Axios with Bearer JWT interceptors
+- **PDF Viewing**: `react-pdf`
+- **Analytics**: `recharts`
+- **Notifications**: `react-hot-toast`
 
-### Backend
-| Technology | Purpose |
-|------------|---------|
-| Node.js + Express | REST API server |
-| MongoDB + Mongoose | Database and ODM |
-| JWT + bcryptjs | Authentication |
-| Passport.js | Google OAuth strategy |
-| Nodemailer | Email verification and notifications |
-| Multer | File upload middleware |
-| Cloudinary | PDF cloud storage |
-
-### Deployment
-| Service | Purpose |
-|---------|---------|
-| Vercel | Frontend hosting |
-| Render | Backend hosting |
-| MongoDB Atlas | Cloud database |
-| Cloudinary | File storage |
+### Backend (`/server`)
+- **Runtime**: Node.js + Express.js
+- **Database**: MongoDB Atlas + Mongoose ODM
+- **Authentication**: JWT (`jsonwebtoken`) + `bcryptjs` + `passport` (Google OAuth 2.0)
+- **File Storage**: Cloudinary (PDF streaming buffer via `multer` memory storage)
+- **Email Service**: Nodemailer (Gmail SMTP SSL)
 
 ---
 
-## 📁 Project Structure
+## 📁 Repository Map
 
 ```
 pyq-portal/
-├── client/                      # React frontend
-│   ├── public/
+├── client/                              # React SPA (Vite)
+│   ├── public/                          # Static assets & logo
 │   ├── src/
 │   │   ├── api/
-│   │   │   └── axios.js         # Axios instance + interceptors
+│   │   │   └── axios.js                 # Base Axios client & JWT interceptor
 │   │   ├── context/
-│   │   │   └── AuthContext.jsx  # Global auth state
+│   │   │   └── AuthContext.jsx          # User authentication state
 │   │   ├── components/
-│   │   │   ├── Navbar.jsx
+│   │   │   ├── Navbar.jsx               # Navigation bar & theme switcher
 │   │   │   ├── Footer.jsx
-│   │   │   ├── FilterBar.jsx
-│   │   │   ├── PaperCard.jsx
-│   │   │   └── ProtectedRoute.jsx
+│   │   │   ├── FilterBar.jsx            # Dynamic taxonomy filters
+│   │   │   ├── PaperCard.jsx            # Paper summary card
+│   │   │   └── ProtectedRoute.jsx       # Auth & Admin route guards
 │   │   ├── pages/
-│   │   │   ├── Home.jsx
-│   │   │   ├── PaperView.jsx
-│   │   │   ├── Login.jsx
-│   │   │   ├── Register.jsx
-│   │   │   ├── Upload.jsx
-│   │   │   ├── AuthCallback.jsx
+│   │   │   ├── Home.jsx                 # Main landing page
+│   │   │   ├── PaperView.jsx            # PDF viewer & reporting modal
+│   │   │   ├── Login.jsx                # User login
+│   │   │   ├── Register.jsx             # Account registration
+│   │   │   ├── Upload.jsx               # Dynamic paper upload page
+│   │   │   ├── AuthCallback.jsx         # Google OAuth landing
 │   │   │   └── admin/
-│   │   │       ├── Dashboard.jsx
-│   │   │       └── ReviewQueue.jsx
+│   │   │       ├── Dashboard.jsx        # Admin analytics & overview
+│   │   │       ├── PendingReview.jsx    # Unified taxonomy review queue
+│   │   │       ├── ReportsQueue.jsx     # Community flags queue
+│   │   │       └── BranchRequests.jsx   # Branch management queue
 │   │   ├── App.jsx
 │   │   └── main.jsx
-│   ├── vercel.json              # Vercel SPA rewrite rules
-│   └── .env.development
+│   └── vercel.json                      # Single-page application rewrite rules
 │
-└── server/                      # Node.js backend
+└── server/                              # Express.js REST API Server
     ├── config/
-    │   ├── db.js                # MongoDB connection
-    │   ├── cloudinary.js        # Cloudinary config
-    │   └── passport.js          # Google OAuth strategy
+    │   ├── db.js                        # MongoDB Atlas connection
+    │   ├── cloudinary.js                # Cloudinary SDK configuration
+    │   └── passport.js                  # Google OAuth strategy
     ├── controllers/
-    │   ├── authController.js
-    │   └── paperController.js
+    │   ├── adminController.js           # Moderation & taxonomy approval APIs
+    │   ├── authController.js            # Login, register, OAuth, email verification
+    │   ├── branchController.js          # Public branch listing API
+    │   └── paperController.js           # CRUD papers, upload, reports, stats
     ├── middleware/
-    │   ├── authMiddleware.js    # JWT verify + adminOnly
-    │   └── uploadMiddleware.js  # Multer config
+    │   ├── authMiddleware.js            # JWT protection & admin guards
+    │   └── uploadMiddleware.js          # Multer in-memory PDF buffer storage
     ├── models/
-    │   ├── User.js
-    │   └── Paper.js
+    │   ├── User.js                      # User account model
+    │   ├── Paper.js                     # Core PYQ paper schema (pending flags)
+    │   ├── Branch.js                    # Branch taxonomy model
+    │   ├── CourseTitle.js               # Course title taxonomy model
+    │   ├── CourseCode.js                # Course code model (refs CourseTitle)
+    │   └── Report.js                    # Community report model
     ├── routes/
+    │   ├── adminRoutes.js
     │   ├── authRoutes.js
+    │   ├── branchRoutes.js
+    │   ├── courseTitleRoutes.js
+    │   ├── courseCodeRoutes.js
     │   └── paperRoutes.js
-    └── index.js
+    ├── services/
+    │   ├── branchService.js             # Branch taxonomy lookup & resolution
+    │   ├── taxonomyService.js           # CourseTitle & CourseCode paired resolution
+    │   ├── dedupService.js              # Duplicate paper metadata matching
+    │   └── reportService.js             # Report creation & resolution logic
+    └── index.js                         # Server entry point & CORS configuration
 ```
 
 ---
 
-## ⚙️ Local Setup
+## ⚙️ Local Development Setup
 
-### Prerequisites
-- Node.js 18+
-- MongoDB Atlas account
-- Cloudinary account
-- Google Cloud Console project (for OAuth)
-- Gmail with App Password (for email)
+### 1. Prerequisites
+- **Node.js**: v18+ installed
+- **MongoDB Atlas**: Database connection string
+- **Cloudinary**: Cloud name, API Key & Secret
+- **Google Cloud Console**: OAuth 2.0 Client ID & Secret
+- **Gmail Account**: App Password for Nodemailer
 
-### 1. Clone the repo
-
-```bash
-git clone https://github.com/y09e5hkumar/NSUT_PYQ-Portal.git
-cd NSUT_PYQ-Portal
-```
-
-### 2. Backend setup
-
+### 2. Backend Setup
 ```bash
 cd server
 npm install
 ```
 
-Create `server/.env`:
-
+Create a `.env` file inside `/server`:
 ```env
 PORT=5001
-MONGO_URI=mongodb+srv://<user>:<pass>@cluster.mongodb.net/pyqportal
-JWT_SECRET=your_jwt_secret
+NODE_ENV=development
+MONGO_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/pyqportal
+JWT_SECRET=your_jwt_secret_key
+SESSION_SECRET=your_session_secret
+
+# Cloudinary Storage
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
-EMAIL_USER=your_gmail@gmail.com
+
+# Email Verification (Gmail SMTP SSL)
+EMAIL_USER=your_email@gmail.com
 EMAIL_PASS=your_gmail_app_password
+
+# Google OAuth 2.0
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
-SESSION_SECRET=any_random_string
-ADMIN_SECRET_CODE=your_secret_admin_code
-CLIENT_URL=http://localhost:5173
+
+# Environment URLs
 SERVER_URL=http://localhost:5001
-NODE_ENV=development
+CLIENT_URL=http://localhost:5173
+
+# Admin Onboarding Passkey
+ADMIN_SECRET_CODE=your_secret_admin_code
 ```
 
+Start the backend server:
 ```bash
 npm run dev
 ```
 
-### 3. Frontend setup
-
+### 3. Frontend Setup
 ```bash
 cd client
 npm install
 ```
 
-Create `client/.env.development`:
-
+Create a `.env.development` file inside `/client`:
 ```env
 VITE_API_URL=http://localhost:5001/api
 VITE_SERVER_URL=http://localhost:5001
 ```
 
+Start the frontend Vite server:
 ```bash
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`, backend on `http://localhost:5001`.
-
-### 4. Create your first admin
-
-- Register normally on the site
-- Use the secret admin code (from `.env`) in the "Register as admin?" field
-- Admin has access to dashboard, review queue, and paper management
+Visit the app at `http://localhost:5173`.
 
 ---
 
-## 🔌 API Reference
+## 🔌 API Route Reference
 
-### Auth
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| POST | `/api/auth/register` | Register new user | Public |
-| POST | `/api/auth/login` | Login user | Public |
-| GET | `/api/auth/me` | Get current user | JWT |
-| GET | `/api/auth/verify/:token` | Verify email | Public |
-| POST | `/api/auth/resend-verification` | Resend verification email | Public |
-| GET | `/api/auth/google` | Google OAuth login | Public |
-| GET | `/api/auth/google/callback` | Google OAuth callback | Public |
+### 🔑 Authentication Routes (`/api/auth`)
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | Register student or admin | Public |
+| `POST` | `/api/auth/login` | Email + password login | Public |
+| `GET` | `/api/auth/me` | Fetch authenticated profile | Bearer JWT |
+| `GET` | `/api/auth/verify/:token` | Email verification link | Public |
+| `POST` | `/api/auth/resend-verification` | Resend verification email | Public |
+| `GET` | `/api/auth/google` | Trigger Google OAuth 2.0 flow | Public |
+| `GET` | `/api/auth/google/callback` | OAuth callback & JWT issuing | Public |
 
-### Papers
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| GET | `/api/papers` | Get papers with filters | Public |
-| GET | `/api/papers/trending` | Get top 10 by downloads | Public |
-| GET | `/api/papers/:id` | Get single paper | Public |
-| POST | `/api/papers` | Upload paper | JWT |
-| PATCH | `/api/papers/:id/download` | Increment download count | Public |
-| GET | `/api/papers/pending` | Get pending papers | Admin |
-| PATCH | `/api/papers/:id/approve` | Approve paper | Admin |
-| DELETE | `/api/papers/:id` | Delete paper | Admin |
-| GET | `/api/papers/stats` | Get dashboard stats | Admin |
-| GET | `/api/papers/branch-stats` | Get branch analytics | Admin |
+### 📄 Paper Routes (`/api/papers`)
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| `GET` | `/api/papers` | Get approved papers (with search & filters) | Public |
+| `GET` | `/api/papers/trending` | Top 10 downloaded papers | Public |
+| `GET` | `/api/papers/:id` | Fetch single paper details | Public |
+| `POST` | `/api/papers` | Upload new PDF paper | Bearer JWT |
+| `POST` | `/api/papers/check-duplicate` | Pre-check metadata duplicates | Public |
+| `PATCH` | `/api/papers/:id/download` | Increment download counter | Public |
+| `POST` | `/api/papers/:id/report` | Report paper for issues | Bearer JWT |
+| `GET` | `/api/papers/stats` | Analytics summary | Admin |
+| `GET` | `/api/papers/branch-stats` | Branch-wise paper metrics | Admin |
+
+### 🛠️ Admin Moderation Routes (`/api/admin`)
+| Method | Endpoint | Description | Access |
+|---|---|---|---|
+| `GET` | `/api/admin/pending-review` | Unified pending queue (branches, titles, codes) | Admin |
+| `PATCH` | `/api/admin/course-titles/approve-pair` | Approve pending title + code pair | Admin |
+| `POST` | `/api/admin/branches/resolve-pending` | Resolve pending branch request | Admin |
+| `GET` | `/api/admin/reports` | List community reported papers | Admin |
+| `PATCH` | `/api/admin/reports/:id/resolve` | Resolve/dismiss paper report | Admin |
+| `DELETE` | `/api/admin/papers/:id` | Remove paper from portal | Admin |
 
 ---
 
-## 🗄️ Database Schema
+## 🗄️ Database Schemas
 
-### User
-```js
+### `Paper.js` (Core Entity)
+```javascript
 {
-  name:               String,
-  email:              String (unique),
-  password:           String (bcrypt hashed),
-  role:               'student' | 'admin',
-  branch:             String,
-  isVerified:         Boolean,
-  googleId:           String,
-  avatar:             String,
-  verificationToken:  String,
-  verificationExpiry: Date,
+  degree:                String, // 'B.Tech'
+  branch:                String, // 'CSE' (or null if pending)
+  semester:              Number, // 1-8
+  courseTitle:           String,
+  courseCode:            String,
+  year:                  Number,
+  examType:              'Mid Sem' | 'End Sem' | 'Summer Sem',
+  pdfUrl:                String, // Cloudinary URL
+  cloudinaryId:          String,
+  uploadedBy:            ObjectId (ref: User),
+  status:                'approved' | 'pending' | 'flagged',
+  downloads:             Number,
+  branchPending:         Boolean,
+  pendingBranchName:     String,
+  courseTitlePending:    Boolean,
+  pendingCourseTitle:    String,
+  courseCodePending:     Boolean,
+  pendingCourseCode:     String
 }
 ```
 
-### Paper
-```js
+### `CourseTitle.js` (Taxonomy)
+```javascript
 {
-  title:        String,
-  branch:       'CSAI'|'CSE'|'CSDS'|'IT'|'ITNS'|'MAC'|'EIOT'|'ECE'|'EE'|'ICE'|'ME'|'BT'|'CSDA'|'CIOT'|'ECAM'|'MEEV'|'CE'|'GI',
-  semester:     Number (1-8),
-  subject:      String,
-  year:         Number,
-  examType:     'Mid Sem' | 'End Sem' | 'Summer Sem',
-  pdfUrl:       String,
-  cloudinaryId: String,
-  uploadedBy:   ObjectId (ref: User),
-  status:       'pending' | 'approved',
-  downloads:    Number,
+  name:        String,
+  branch:      String, // Branch code
+  semester:    Number,
+  isPending:   Boolean,
+  submittedBy: ObjectId (ref: User),
+  isActive:    Boolean
 }
 ```
 
 ---
 
-## 🚢 Deployment
+## 🤝 Contributing & Guidelines
 
-### Frontend (Vercel)
-1. Push code to GitHub
-2. Import repo on [vercel.com](https://vercel.com)
-3. Set root directory to `client`
-4. Add environment variables:
-   ```
-   VITE_API_URL=https://your-backend.onrender.com/api
-   VITE_SERVER_URL=https://your-backend.onrender.com
-   ```
-5. Deploy
-
-### Backend (Render)
-1. Create new Web Service on [render.com](https://render.com)
-2. Connect your GitHub repo
-3. Set root directory to `server`
-4. Start command: `npm start`
-5. Add all environment variables from `.env`
-6. Deploy
-
----
-
-## 🤝 Contributing
-
-Students can contribute PYQs directly through the portal:
-
-1. Register and verify your email
-2. Click **Upload** in the navbar
-3. Fill in the paper metadata and upload PDF
-4. Your submission goes into a pending review queue
-5. Admin approves → paper goes live → you get an email notification
+1. **Bug Reports & Features**: Feel free to submit a pull request or open an issue on GitHub.
+2. **Uploading PYQs**: Students can upload past papers directly using the **Upload** option in the navigation bar.
 
 ---
 
@@ -313,6 +292,4 @@ Students can contribute PYQs directly through the portal:
 
 **Yogesh Kumar**  
 B.Tech CSE, NSUT Delhi  
-[GitHub](https://github.com/y09e5hkumar) · [LinkedIn](https://www.linkedin.com/in/yogesh-kumar-94398028a/)
-
-
+[GitHub Profile](https://github.com/y09e5hkumar) · [LinkedIn](https://www.linkedin.com/in/yogesh-kumar-94398028a/)
